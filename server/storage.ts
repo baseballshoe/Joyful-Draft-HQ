@@ -16,6 +16,7 @@ import {
   type EnrichedPlayer,
   type DashboardData
 } from "@shared/schema";
+import { type ParsedImportData, calcConsensus, normalizeName } from "./import-service";
 
 function enrichPlayer(p: Player): EnrichedPlayer {
   return {
@@ -46,6 +47,9 @@ export interface IStorage {
   // Cheat Sheet
   getCheatSheet(): Promise<Record<string, string>>;
   updateCheatSheet(section: string, content: string): Promise<void>;
+
+  // Import Rankings
+  importRankings(data: ParsedImportData): Promise<{ updated: number; inserted: number; total: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -233,6 +237,89 @@ export class DatabaseStorage implements IStorage {
       await db.insert(cheatSheet)
         .values({ section, content });
     }
+  }
+
+  async importRankings(data: ParsedImportData): Promise<{ updated: number; inserted: number; total: number }> {
+    const { fp, espn, yahoo } = data;
+    const maxRank = fp.size || 300;
+
+    // Load all existing players
+    const existing = await db.select().from(players);
+    const byName = new Map<string, Player>();
+    for (const p of existing) {
+      byName.set(normalizeName(p.name), p);
+    }
+
+    let updated = 0;
+    let inserted = 0;
+
+    // Process every player from the FP list (master source)
+    for (const [key, fpPlayer] of fp.entries()) {
+      const espnPlayer = espn.get(key);
+      const yahooPlayer = yahoo.get(key);
+
+      const fpRank = fpPlayer.rank;
+      const espnRank = espnPlayer?.rank ?? null;
+      const yahooRank = yahooPlayer?.rank ?? null;
+      const consensus = calcConsensus(fpRank, espnRank, yahooRank, maxRank);
+
+      const existing = byName.get(key);
+      if (existing) {
+        await db.update(players)
+          .set({
+            fpRank,
+            espnRank,
+            yahooRank,
+            consensusRank: consensus,
+            team: fpPlayer.team || existing.team,
+            posDisplay: fpPlayer.posDisplay !== "UTIL" ? fpPlayer.posDisplay : existing.posDisplay,
+            updatedAt: new Date(),
+          })
+          .where(eq(players.id, existing.id));
+        updated++;
+      } else {
+        await db.insert(players).values({
+          name: fpPlayer.name,
+          team: fpPlayer.team || espnPlayer?.team || yahooPlayer?.team || "",
+          positions: fpPlayer.posDisplay,
+          posDisplay: fpPlayer.posDisplay,
+          fpRank,
+          espnRank,
+          yahooRank,
+          consensusRank: consensus,
+          status: "available",
+        });
+        inserted++;
+      }
+    }
+
+    // Also update ESPN-only and Yahoo-only players that exist in our DB
+    for (const [key, espnPlayer] of espn.entries()) {
+      if (fp.has(key)) continue; // already handled above
+      const existing = byName.get(key);
+      if (existing) {
+        const yahooPlayer = yahoo.get(key);
+        const consensus = calcConsensus(existing.fpRank, espnPlayer.rank, yahooPlayer?.rank ?? existing.yahooRank, maxRank);
+        await db.update(players)
+          .set({ espnRank: espnPlayer.rank, yahooRank: yahooPlayer?.rank ?? existing.yahooRank, consensusRank: consensus, updatedAt: new Date() })
+          .where(eq(players.id, existing.id));
+        updated++;
+      }
+    }
+
+    for (const [key, yahooPlayer] of yahoo.entries()) {
+      if (fp.has(key) || espn.has(key)) continue; // already handled above
+      const existing = byName.get(key);
+      if (existing) {
+        const consensus = calcConsensus(existing.fpRank, existing.espnRank, yahooPlayer.rank, maxRank);
+        await db.update(players)
+          .set({ yahooRank: yahooPlayer.rank, consensusRank: consensus, updatedAt: new Date() })
+          .where(eq(players.id, existing.id));
+        updated++;
+      }
+    }
+
+    return { updated, inserted, total: updated + inserted };
   }
 }
 

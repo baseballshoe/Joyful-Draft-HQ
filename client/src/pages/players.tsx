@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 import { PosBadge, TagPill, TagSelector, ActionBtns, StatusPill, EditableRank } from '@/components/game-ui';
 
@@ -13,6 +13,45 @@ export default function Players() {
   const [status,  setStatus]  = useState('all');
   const [tag,     setTag]     = useState('all');
   const [loading, setLoading] = useState(true);
+
+  const [showImport, setShowImport] = useState(false);
+  const [fpFile,    setFpFile]    = useState<File | null>(null);
+  const [espnFile,  setEspnFile]  = useState<File | null>(null);
+  const [yahooFile, setYahooFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const fpRef    = useRef<HTMLInputElement>(null);
+  const espnRef  = useRef<HTMLInputElement>(null);
+  const yahooRef = useRef<HTMLInputElement>(null);
+
+  async function handleImport() {
+    if (!fpFile && !espnFile && !yahooFile) {
+      setImportMsg({ text: 'Please attach at least one file.', ok: false });
+      return;
+    }
+    setImporting(true);
+    setImportMsg(null);
+    try {
+      const form = new FormData();
+      if (fpFile)    form.append('fpFile',    fpFile);
+      if (espnFile)  form.append('espnFile',  espnFile);
+      if (yahooFile) form.append('yahooFile', yahooFile);
+      const res = await fetch('/api/import', { method: 'POST', body: form });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || 'Import failed');
+      setImportMsg({ text: `✓ Import complete — ${json.updated} updated, ${json.inserted} new players added.`, ok: true });
+      setFpFile(null); setEspnFile(null); setYahooFile(null);
+      if (fpRef.current)    fpRef.current.value    = '';
+      if (espnRef.current)  espnRef.current.value  = '';
+      if (yahooRef.current) yahooRef.current.value = '';
+      load();
+    } catch (err: any) {
+      setImportMsg({ text: err.message || 'Import failed.', ok: false });
+    } finally {
+      setImporting(false);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,6 +82,20 @@ export default function Players() {
     injured: 'active-orange', skip: 'active-red', all: '',
   };
 
+  const importFieldStyle: React.CSSProperties = {
+    display: 'flex', flexDirection: 'column', gap: 5,
+    background: '#fff', border: '1px solid var(--joyt-border)',
+    borderRadius: 6, padding: '10px 12px', cursor: 'default',
+  };
+  const importLabelStyle: React.CSSProperties = {
+    fontWeight: 700, fontSize: 12, color: 'var(--joyt-text)', display: 'flex', gap: 6, alignItems: 'center',
+  };
+  const importInputStyle: React.CSSProperties = {
+    fontSize: 11, color: 'var(--joyt-text-mid)',
+    border: '1px dashed var(--joyt-border)', borderRadius: 4,
+    padding: '4px 6px', background: '#F7F8FF', cursor: 'pointer',
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
 
@@ -71,7 +124,7 @@ export default function Players() {
               </button>
             ))}
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
             {STATUSES.map((s) => (
               <button key={s}
                 className={`filter-pill ${status === s ? (statusColors[s] || 'active') : ''}`}
@@ -81,6 +134,13 @@ export default function Players() {
                 {s === 'all' ? 'All Status' : s === 'mine' ? 'My Picks' : s === 'drafted' ? 'Drafted' : 'Available'}
               </button>
             ))}
+            <button
+              className={`filter-pill ${showImport ? 'active' : ''}`}
+              onClick={() => { setShowImport(v => !v); setImportMsg(null); }}
+              style={{ marginLeft: 8, fontWeight: 700 }}
+              data-testid="button-toggle-import">
+              📥 Import Rankings
+            </button>
           </div>
         </div>
 
@@ -105,6 +165,103 @@ export default function Players() {
                       padding: '4px 10px', borderRadius: 5 }}>
           ✎ Click MY RANK, ROUND ✎, or MY POS ✎ cells to edit inline — press Enter or click away to save
         </div>
+
+        {/* Import Panel */}
+        {showImport && (
+          <div style={{
+            background: '#FAFBFF', border: '1.5px solid var(--joyt-border)',
+            borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12,
+          }} data-testid="panel-import">
+            <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--joyt-text)' }}>
+              📥 Import Player Rankings
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--joyt-text-mid)', lineHeight: 1.5 }}>
+              Upload your ranking files below. All three are optional — upload whichever you have.
+              Your existing draft picks, tags, and custom ranks will <strong>not</strong> be changed.
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              {/* FantasyPros */}
+              <label style={importFieldStyle}>
+                <span style={importLabelStyle}>
+                  <span style={{ background: '#4FC3F7', color: '#fff', borderRadius: 3, padding: '1px 5px', fontSize: 10, fontWeight: 700 }}>FP</span>
+                  FantasyPros CSV
+                </span>
+                <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>
+                  Columns: RK, PLAYER NAME, TEAM, POS
+                </span>
+                <input
+                  ref={fpRef} type="file" accept=".csv"
+                  style={importInputStyle}
+                  data-testid="input-fp-file"
+                  onChange={(e) => setFpFile(e.target.files?.[0] ?? null)}
+                />
+                {fpFile && <span style={{ fontSize: 11, color: 'var(--joyt-green)', fontWeight: 600 }}>✓ {fpFile.name}</span>}
+              </label>
+
+              {/* ESPN */}
+              <label style={importFieldStyle}>
+                <span style={importLabelStyle}>
+                  <span style={{ background: '#EF5350', color: '#fff', borderRadius: 3, padding: '1px 5px', fontSize: 10, fontWeight: 700 }}>ESPN</span>
+                  ESPN XLSX
+                </span>
+                <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>
+                  Columns: Rank, Name, Team, Position, Auction Value
+                </span>
+                <input
+                  ref={espnRef} type="file" accept=".xlsx,.xls"
+                  style={importInputStyle}
+                  data-testid="input-espn-file"
+                  onChange={(e) => setEspnFile(e.target.files?.[0] ?? null)}
+                />
+                {espnFile && <span style={{ fontSize: 11, color: 'var(--joyt-green)', fontWeight: 600 }}>✓ {espnFile.name}</span>}
+              </label>
+
+              {/* Yahoo */}
+              <label style={importFieldStyle}>
+                <span style={importLabelStyle}>
+                  <span style={{ background: '#7B1FA2', color: '#fff', borderRadius: 3, padding: '1px 5px', fontSize: 10, fontWeight: 700 }}>YHO</span>
+                  Yahoo XLSX
+                </span>
+                <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>
+                  Columns: Rank, Name, Team, Position
+                </span>
+                <input
+                  ref={yahooRef} type="file" accept=".xlsx,.xls"
+                  style={importInputStyle}
+                  data-testid="input-yahoo-file"
+                  onChange={(e) => setYahooFile(e.target.files?.[0] ?? null)}
+                />
+                {yahooFile && <span style={{ fontSize: 11, color: 'var(--joyt-green)', fontWeight: 600 }}>✓ {yahooFile.name}</span>}
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button
+                className="btn"
+                onClick={handleImport}
+                disabled={importing}
+                style={{ background: 'var(--joyt-pink)', color: '#fff', opacity: importing ? 0.6 : 1 }}
+                data-testid="button-run-import">
+                {importing ? 'Importing…' : 'Run Import'}
+              </button>
+              <button
+                className="btn"
+                onClick={() => { setShowImport(false); setImportMsg(null); setFpFile(null); setEspnFile(null); setYahooFile(null); }}
+                style={{ background: 'var(--joyt-bg)', color: 'var(--joyt-text-mid)' }}>
+                Cancel
+              </button>
+              {importMsg && (
+                <span style={{
+                  fontSize: 12, fontWeight: 600,
+                  color: importMsg.ok ? 'var(--joyt-green)' : 'var(--joyt-red)',
+                }} data-testid="text-import-result">
+                  {importMsg.text}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Table */}

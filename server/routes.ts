@@ -4,6 +4,8 @@ import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { WebSocketServer, WebSocket } from "ws";
+import multer from "multer";
+import { parseFPBuffer, parseESPNBuffer, parseYahooBuffer } from "./import-service";
 
 // Seed function to populate some initial players if empty
 async function seedDatabase() {
@@ -66,6 +68,8 @@ async function seedDatabase() {
     console.log("Database seeded successfully");
   }
 }
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 export async function registerRoutes(
   httpServer: Server,
@@ -220,6 +224,37 @@ export async function registerRoutes(
         return res.status(400).json({ message: err.errors[0].message });
       }
       res.status(500).json({ message: "Internal Error" });
+    }
+  });
+
+  // Import Rankings
+  app.post("/api/import", upload.fields([
+    { name: "fpFile", maxCount: 1 },
+    { name: "espnFile", maxCount: 1 },
+    { name: "yahooFile", maxCount: 1 },
+  ]), async (req, res) => {
+    try {
+      const files = req.files as Record<string, Express.Multer.File[]>;
+
+      const fpBuffer   = files?.fpFile?.[0]?.buffer;
+      const espnBuffer = files?.espnFile?.[0]?.buffer;
+      const yahooBuffer = files?.yahooFile?.[0]?.buffer;
+
+      if (!fpBuffer && !espnBuffer && !yahooBuffer) {
+        return res.status(400).json({ message: "No files uploaded. Provide at least one ranking file." });
+      }
+
+      const fp    = fpBuffer    ? parseFPBuffer(fpBuffer)       : new Map();
+      const espn  = espnBuffer  ? parseESPNBuffer(espnBuffer)   : new Map();
+      const yahoo = yahooBuffer ? parseYahooBuffer(yahooBuffer) : new Map();
+
+      const result = await storage.importRankings({ fp, espn, yahoo });
+
+      broadcast({ type: 'rankings_imported', data: result });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      console.error("Import error:", err);
+      res.status(500).json({ message: err?.message ?? "Import failed" });
     }
   });
 

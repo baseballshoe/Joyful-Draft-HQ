@@ -173,7 +173,7 @@ export function TagSelector({ tags = [], playerId, onSave }: TagSelectorProps) {
     const current = tags.includes(tag)
       ? tags.filter((t) => t !== tag)
       : [...tags, tag];
-    const updated = await api.patchPlayer(playerId, { tags: current });
+    const updated = await api.patchPlayer(playerId, { tags: current.join(',') });
     onSave?.(updated);
   }
   return (
