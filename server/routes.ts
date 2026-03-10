@@ -248,10 +248,15 @@ export async function registerRoutes(
       const espn  = espnBuffer  ? parseESPNBuffer(espnBuffer)   : new Map();
       const yahoo = yahooBuffer ? parseYahooBuffer(yahooBuffer) : new Map();
 
+      console.log(`[Import] parsed rows — FP: ${fp.size}, ESPN: ${espn.size}, Yahoo: ${yahoo.size}`);
+
       const result = await storage.importRankings({ fp, espn, yahoo });
 
       broadcast({ type: 'rankings_imported', data: result });
-      res.json({ ok: true, ...result });
+      res.json({
+        ok: true, ...result,
+        parsed: { fp: fp.size, espn: espn.size, yahoo: yahoo.size },
+      });
     } catch (err: any) {
       console.error("Import error:", err);
       res.status(500).json({ message: err?.message ?? "Import failed" });

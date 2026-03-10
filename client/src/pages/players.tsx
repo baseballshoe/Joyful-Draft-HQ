@@ -40,7 +40,12 @@ export default function Players() {
       const res = await fetch('/api/import', { method: 'POST', body: form });
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || 'Import failed');
-      setImportMsg({ text: `✓ Import complete — ${json.updated} updated, ${json.inserted} new players added.`, ok: true });
+      const parts = [];
+      if (json.parsed?.fp)    parts.push(`FP: ${json.parsed.fp}`);
+      if (json.parsed?.espn)  parts.push(`ESPN: ${json.parsed.espn}`);
+      if (json.parsed?.yahoo) parts.push(`Yahoo: ${json.parsed.yahoo}`);
+      const parsedInfo = parts.length ? ` (${parts.join(', ')} parsed)` : '';
+      setImportMsg({ text: `✓ Import complete — ${json.updated} updated, ${json.inserted} new.${parsedInfo}`, ok: true });
       setFpFile(null); setEspnFile(null); setYahooFile(null);
       if (fpRef.current)    fpRef.current.value    = '';
       if (espnRef.current)  espnRef.current.value  = '';
@@ -221,13 +226,13 @@ export default function Players() {
               <label style={importFieldStyle}>
                 <span style={importLabelStyle}>
                   <span style={{ background: '#7B1FA2', color: '#fff', borderRadius: 3, padding: '1px 5px', fontSize: 10, fontWeight: 700 }}>YHO</span>
-                  Yahoo XLSX
+                  Yahoo XLSX or CSV
                 </span>
                 <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>
-                  Columns: Rank, Name, Team, Position
+                  Export from Yahoo Fantasy → "Rankings" tab. Column headers auto-detected.
                 </span>
                 <input
-                  ref={yahooRef} type="file" accept=".xlsx,.xls"
+                  ref={yahooRef} type="file" accept=".xlsx,.xls,.csv"
                   style={importInputStyle}
                   data-testid="input-yahoo-file"
                   onChange={(e) => setYahooFile(e.target.files?.[0] ?? null)}

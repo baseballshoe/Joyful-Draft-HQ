@@ -225,26 +225,27 @@ export class DatabaseStorage implements IStorage {
       const pickStart = (r - 1) * 12 + 1;
       const pickEnd = r * 12;
 
-      // Fetch ALL players that belong in this round:
-      //   - naturally ranked within pick range, OR
-      //   - explicitly assigned to this round via roundOverride
-      // Then sort all of them together by priority rank so overrides appear in proper rank order
-      const roundRaw = await db.select().from(players)
+      // Always include ALL players explicitly forced into this round (no limit)
+      const forcedRaw = await db.select().from(players)
+        .where(and(eq(players.status, 'available'), eq(players.roundOverride, r)))
+        .orderBy(orderByMode);
+      const forced = forcedRaw.map(enrichPlayer);
+
+      // Fill remaining spots with top natural picks for this round (not already forced into any round)
+      const naturalRaw = await db.select().from(players)
         .where(and(
           eq(players.status, 'available'),
-          or(
-            eq(players.roundOverride, r),
-            and(
-              sql`${players.roundOverride} IS NULL`,
-              sql`${players.consensusRank} >= ${pickStart}`,
-              sql`${players.consensusRank} <= ${pickEnd}`
-            )
-          )
+          sql`${players.roundOverride} IS NULL`,
+          sql`${players.consensusRank} >= ${pickStart}`,
+          sql`${players.consensusRank} <= ${pickEnd}`
         ))
         .orderBy(orderByMode)
         .limit(5);
+      const natural = naturalRaw.map(enrichPlayer);
 
-      roundData[r] = roundRaw.map(enrichPlayer);
+      // Merge all and sort together by priority rank
+      const all = [...forced, ...natural].sort((a, b) => a.priorityRank - b.priorityRank);
+      roundData[r] = all;
     }
 
     const [nextBestRaw] = await db.select().from(players)

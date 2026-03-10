@@ -113,24 +113,50 @@ export function parseESPNBuffer(buffer: Buffer): Map<string, ParsedRankSource> {
 }
 
 export function parseYahooBuffer(buffer: Buffer): Map<string, ParsedRankSource> {
-  // Yahoo files use various column headers — try each known variant
-  const wb = XLSX.read(buffer, { type: "buffer" });
+  // XLSX.read handles both .xlsx and .csv automatically
+  const wb = XLSX.read(buffer, { type: "buffer", raw: false });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: null });
   if (rows.length === 0) return new Map();
 
-  const sampleRow = rows[0];
-  const keys = Object.keys(sampleRow);
+  const keys = Object.keys(rows[0]);
 
-  const findCol = (...candidates: string[]) =>
-    candidates.find((c) => keys.some((k) => k.toLowerCase() === c.toLowerCase())) ?? candidates[0];
+  // findActualKey returns the REAL key name from the file (preserving its casing)
+  // so that row[key] lookups actually work
+  const findActualKey = (...candidates: string[]): string => {
+    for (const c of candidates) {
+      const hit = keys.find((k) => k.toLowerCase().trim() === c.toLowerCase().trim());
+      if (hit) return hit;
+    }
+    // last resort: return the first numeric-looking key for rank, or first key for name
+    return candidates[0];
+  };
 
-  const rankCol   = findCol("Rank", "Overall Rank", "Rank #", "#");
-  const nameCol   = findCol("Name", "Player Name", "Player", "Full Name");
-  const teamCol   = findCol("Team", "Team Abbrev", "Team Name", "NFL Team");
-  const posCol    = findCol("Position", "Eligible Positions", "Pos", "Primary Position");
+  const rankCol = findActualKey("Rank", "Overall Rank", "Rank #", "#", "ADP", "Rk", "rk");
+  const nameCol = findActualKey("Name", "Player Name", "Player", "Full Name", "PLAYER", "Player Name (Team/Bye)");
+  const teamCol = findActualKey("Team", "Team Abbrev", "Team Name", "NFL Team", "TEAM", "Team(s)");
+  const posCol  = findActualKey("Position", "Eligible Positions", "Pos", "Primary Position", "POS", "Type");
 
-  return parseXLSXBuffer(buffer, rankCol, nameCol, teamCol, posCol);
+  console.log("[Yahoo import] columns detected →", { rankCol, nameCol, teamCol, posCol });
+  console.log("[Yahoo import] sample row →", rows[0]);
+
+  const map = new Map<string, ParsedRankSource>();
+  for (const row of rows) {
+    const rawName = row[nameCol];
+    if (!rawName) continue;
+    const name = rawName.toString().trim();
+    const rank = parseInt(row[rankCol]);
+    const pos  = (row[posCol]  ?? "").toString().trim();
+    const team = (row[teamCol] ?? "").toString().trim();
+    map.set(normalizeName(name), {
+      name,
+      rank: !isNaN(rank) ? rank : null,
+      team,
+      posDisplay: normalizePos(pos),
+    });
+  }
+  console.log(`[Yahoo import] parsed ${map.size} players`);
+  return map;
 }
 
 // ── Consensus rank calculation ───────────────────────────────────────────────
