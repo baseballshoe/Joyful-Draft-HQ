@@ -241,8 +241,8 @@ export class DatabaseStorage implements IStorage {
           .where(and(
             eq(players.status, 'available'),
             sql`${players.roundOverride} IS NULL`,
-            sql`${players.consensusRank} >= ${pickStart}`,
-            sql`${players.consensusRank} <= ${pickEnd}`
+            sql`COALESCE(${players.myRank}, ${players.consensusRank}) >= ${pickStart}`,
+            sql`COALESCE(${players.myRank}, ${players.consensusRank}) <= ${pickEnd}`
           ))
           .orderBy(orderByMode)
           .limit(naturalLimit);
