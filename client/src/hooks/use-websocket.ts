@@ -1,25 +1,26 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@shared/routes";
 
 export function useWebSocket() {
   const queryClient = useQueryClient();
   const wsRef = useRef<WebSocket | null>(null);
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
-    // Vite handles /vite-hmr, we want our own socket
     const wsUrl = `${protocol}//${host}/ws`;
 
     const connect = () => {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
+      ws.onopen = () => setConnected(true);
+
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          
           if (msg.type === "draft_state") {
             queryClient.setQueryData([api.draftState.get.path], msg.data);
             queryClient.invalidateQueries({ queryKey: [api.dashboard.get.path] });
@@ -40,7 +41,7 @@ export function useWebSocket() {
       };
 
       ws.onclose = () => {
-        // Exponential backoff or simple timeout for reconnect
+        setConnected(false);
         setTimeout(connect, 2000);
       };
     };
@@ -54,4 +55,6 @@ export function useWebSocket() {
       }
     };
   }, [queryClient]);
+
+  return { connected };
 }

@@ -1,47 +1,84 @@
-import { useCheatSheet, useUpdateCheatSheet } from "@/hooks/use-cheat-sheet";
-import { BookOpen } from "lucide-react";
+import { useState, useEffect } from 'react';
+import { api } from '@/lib/api';
+import { Card } from '@/components/game-ui';
 
-const SECTIONS = [
-  { id: 'strategy', title: 'Overall Strategy', color: 'text-primary' },
-  { id: 'avoid', title: 'Do Not Draft', color: 'text-red-400' },
-  { id: 'sleepers', title: 'Late Round Sleepers', color: 'text-purple-400' },
-  { id: 'scratchpad', title: 'Scratchpad', color: 'text-muted-foreground' }
-];
+type CheatSheetContent = {
+  strategy: string;
+  avoid: string;
+  sleepers: string;
+  scratchpad: string;
+};
+
+const sections = [
+  { key: 'strategy', title: 'Draft Strategy',   accent: 'var(--joyt-blue)',   placeholder: 'Add your draft strategy notes…' },
+  { key: 'avoid',    title: 'Avoid / Red Flags', accent: 'var(--joyt-red)',    placeholder: 'Players to avoid, injury concerns…' },
+  { key: 'sleepers', title: 'Sleeper Targets',   accent: 'var(--joyt-purple)', placeholder: 'Late-round value plays…' },
+] as const;
 
 export default function CheatSheet() {
-  const { data: cheatSheet, isLoading } = useCheatSheet();
-  const updateCheatSheet = useUpdateCheatSheet();
+  const [content, setContent] = useState<CheatSheetContent>({
+    strategy: '', avoid: '', sleepers: '', scratchpad: '',
+  });
 
-  if (isLoading) return null;
+  useEffect(() => {
+    api.getCheatSheet().then((data: Record<string, string>) => {
+      setContent({
+        strategy:   data.strategy   ?? '',
+        avoid:      data.avoid      ?? '',
+        sleepers:   data.sleepers   ?? '',
+        scratchpad: data.scratchpad ?? '',
+      });
+    });
+  }, []);
+
+  async function save(section: string, value: string) {
+    setContent((c) => ({ ...c, [section]: value }));
+    await api.patchCheatSheet(section, value);
+  }
 
   return (
-    <div className="flex flex-col h-full gap-6">
-      <div className="flex items-center gap-3 mb-2">
-        <BookOpen className="w-8 h-8 text-primary" />
-        <div>
-          <h1 className="text-3xl font-display font-bold text-foreground">Cheat Sheet</h1>
-          <p className="text-muted-foreground text-sm">Your personal scratchpad. Saves automatically on blur.</p>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div style={{
+        background: 'var(--joyt-pink-light)', padding: '8px 16px',
+        fontSize: 12, color: 'var(--joyt-pink)', fontWeight: 500, flexShrink: 0,
+      }}>
+        Your draft notes — type in any section. Changes auto-save and sync to your partner in real time.
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 pb-6">
-        {SECTIONS.map(section => (
-          <div key={section.id} className="flex flex-col bg-card/80 backdrop-blur rounded-2xl border border-border/50 shadow-xl overflow-hidden group focus-within:ring-2 focus-within:ring-primary/20 transition-all">
-             <div className={`px-5 py-3 border-b border-border/50 bg-muted/20 font-display font-bold tracking-wide ${section.color}`}>
-               {section.title}
-             </div>
-             <textarea
-               className="flex-1 w-full p-5 bg-transparent border-none resize-none focus:outline-none text-[13px] font-mono text-foreground placeholder:text-muted-foreground/30 leading-relaxed"
-               defaultValue={cheatSheet?.[section.id] || ''}
-               onBlur={(e) => {
-                 if (e.target.value !== cheatSheet?.[section.id]) {
-                   updateCheatSheet.mutate({ section: section.id, content: e.target.value });
-                 }
-               }}
-               placeholder={`Enter your ${section.id} notes here...`}
-             />
-          </div>
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, padding: 10, overflow: 'hidden' }}>
+        {sections.map(({ key, title, accent, placeholder }) => (
+          <Card key={key} accent={accent} title={title}
+            style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <textarea
+              className="notes-area"
+              style={{ flex: 1, margin: 10, height: 'calc(100% - 20px)', resize: 'none' }}
+              placeholder={placeholder}
+              value={content[key as keyof CheatSheetContent]}
+              onChange={(e) => save(key, e.target.value)}
+              data-testid={`textarea-${key}`}
+            />
+          </Card>
         ))}
+      </div>
+
+      {/* Scratch pad */}
+      <div style={{
+        background: 'var(--joyt-header)', padding: '10px 16px',
+        display: 'flex', gap: 12, alignItems: 'flex-start', flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#5C6370', whiteSpace: 'nowrap', paddingTop: 3 }}>
+          SCRATCH PAD:
+        </span>
+        <textarea
+          style={{
+            flex: 1, background: 'transparent', border: 'none', outline: 'none',
+            color: '#9AA3AF', fontSize: 12, fontFamily: 'var(--font-sans)', resize: 'none', height: 36,
+          }}
+          placeholder="Live draft notes — anything goes…"
+          value={content.scratchpad}
+          onChange={(e) => save('scratchpad', e.target.value)}
+          data-testid="textarea-scratchpad"
+        />
       </div>
     </div>
   );

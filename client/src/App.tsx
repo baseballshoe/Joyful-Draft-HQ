@@ -12,28 +12,21 @@ import ByPosition from "./pages/by-position";
 import MyRoster from "./pages/my-roster";
 import CheatSheet from "./pages/cheat-sheet";
 import RoundStrategy from "./pages/round-strategy";
-import { useWebSocket } from "./hooks/use-websocket";
 
 function Router() {
   return (
     <AppLayout>
       <Switch>
-        <Route path="/" component={Dashboard}/>
-        <Route path="/players" component={Players}/>
-        <Route path="/by-position" component={ByPosition}/>
-        <Route path="/my-roster" component={MyRoster}/>
-        <Route path="/cheat-sheet" component={CheatSheet}/>
-        <Route path="/round-strategy" component={RoundStrategy}/>
+        <Route path="/" component={Dashboard} />
+        <Route path="/players" component={Players} />
+        <Route path="/by-position" component={ByPosition} />
+        <Route path="/my-roster" component={MyRoster} />
+        <Route path="/cheat-sheet" component={CheatSheet} />
+        <Route path="/round-strategy" component={RoundStrategy} />
         <Route component={NotFound} />
       </Switch>
     </AppLayout>
   );
-}
-
-// Wrapper component to handle WS hook which needs QueryClient context
-function AppContent() {
-  useWebSocket();
-  return <Router />;
 }
 
 function App() {
@@ -41,7 +34,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <AppContent />
+        <Router />
       </TooltipProvider>
     </QueryClientProvider>
   );
