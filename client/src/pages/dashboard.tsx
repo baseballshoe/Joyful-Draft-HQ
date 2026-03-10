@@ -49,6 +49,7 @@ function PlayerListRow({ player, rank, accentColor, onUpdate }: any) {
 
 // ── Round chips ───────────────────────────────────────────────────────────
 function RoundChip({ player, onUpdate }: any) {
+  const tags: string[] = player.tagsArray ?? [];
   return (
     <div style={{
       background: 'var(--joyt-surface)', borderRadius: 8,
@@ -57,13 +58,18 @@ function RoundChip({ player, onUpdate }: any) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <PosBadge pos={player.posDisplay} style={{ fontSize: 9 }} />
         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--joyt-amber)' }}>
-          #{Math.round(player.consensusRank)}
+          #{Math.round(player.priorityRank)}
         </span>
       </div>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--joyt-text)',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {player.name}
       </div>
+      {tags.length > 0 && (
+        <div style={{ display: 'flex', gap: 3, marginTop: 4, flexWrap: 'wrap' }}>
+          {tags.map((t: string) => <TagPill key={t} tag={t} />)}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
         <ActionBtns player={player} onUpdate={onUpdate} size="sm" />
       </div>
@@ -98,18 +104,24 @@ function QuickMark({ onUpdate }: { onUpdate: () => void }) {
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {results.map((p) => (
           <div key={p.id} style={{
-            display: 'flex', alignItems: 'center', gap: 6,
             padding: '6px 10px', borderBottom: '1px solid var(--joyt-border)',
           }}>
-            <PosBadge pos={p.posDisplay} style={{ fontSize: 9 }} />
-            <span style={{ flex: 1, fontSize: 12, fontWeight: 700, minWidth: 0,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {p.name}
-            </span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--joyt-amber)', marginRight: 4 }}>
-              #{Math.round(p.priorityRank)}
-            </span>
-            <ActionBtns player={p} onUpdate={onUpdate} size="sm" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <PosBadge pos={p.posDisplay} style={{ fontSize: 9 }} />
+              <span style={{ flex: 1, fontSize: 12, fontWeight: 700, minWidth: 0,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {p.name}
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--joyt-amber)', marginRight: 4 }}>
+                #{Math.round(p.priorityRank)}
+              </span>
+              <ActionBtns player={p} onUpdate={onUpdate} size="sm" />
+            </div>
+            {(p.tagsArray ?? []).length > 0 && (
+              <div style={{ display: 'flex', gap: 3, marginTop: 3, marginLeft: 22, flexWrap: 'wrap' }}>
+                {(p.tagsArray ?? []).map((t: string) => <TagPill key={t} tag={t} />)}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -168,13 +180,19 @@ function BestByPos({ bestByPos, onUpdate }: { bestByPos: Record<string, any>; on
           </div>
         );
         return (
-          <div key={pos} style={{ display: 'flex', alignItems: 'center', gap: 8,
-            padding: '7px 12px', borderBottom: '1px solid var(--joyt-border)' }}>
-            <PosBadge pos={pos} />
-            <span style={{ flex: 1, fontSize: 12, fontWeight: 700 }}>{p.name}</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--joyt-amber)' }}>
-              #{Math.round(p.priorityRank)}
-            </span>
+          <div key={pos} style={{ padding: '7px 12px', borderBottom: '1px solid var(--joyt-border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <PosBadge pos={pos} />
+              <span style={{ flex: 1, fontSize: 12, fontWeight: 700 }}>{p.name}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--joyt-amber)' }}>
+                #{Math.round(p.priorityRank)}
+              </span>
+            </div>
+            {(p.tagsArray ?? []).length > 0 && (
+              <div style={{ display: 'flex', gap: 3, marginTop: 3, marginLeft: 28, flexWrap: 'wrap' }}>
+                {(p.tagsArray ?? []).map((t: string) => <TagPill key={t} tag={t} />)}
+              </div>
+            )}
           </div>
         );
       })}
@@ -339,8 +357,11 @@ export default function Dashboard() {
                     <span style={{ fontSize: 12, fontWeight: 700, overflow: 'hidden',
                                    textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--joyt-text-light)', marginTop: 2 }}>
-                    Rd {Math.ceil((p.consensusRank ?? 1) / 12)}
+                  <div style={{ display: 'flex', gap: 3, marginTop: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>
+                      Rd {Math.ceil((p.consensusRank ?? 1) / 12)}
+                    </span>
+                    {(p.tagsArray ?? []).map((t: string) => <TagPill key={t} tag={t} />)}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -367,6 +388,11 @@ export default function Dashboard() {
                     <PosBadge pos={p.posDisplay} />
                     <span style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</span>
                   </div>
+                  {(p.tagsArray ?? []).length > 0 && (
+                    <div style={{ display: 'flex', gap: 3, marginTop: 4, flexWrap: 'wrap' }}>
+                      {(p.tagsArray ?? []).map((t: string) => <TagPill key={t} tag={t} />)}
+                    </div>
+                  )}
                   <div style={{ marginTop: 6 }}>
                     <ActionBtns player={p} onUpdate={handlePlayerUpdate} size="sm" />
                   </div>
