@@ -133,7 +133,9 @@ export class DatabaseStorage implements IStorage {
       query = query.where(and(...conditions));
     }
 
-    const results = await query.orderBy(asc(players.consensusRank));
+    const results = await query.orderBy(
+      sql`${players.consensusRank} ASC NULLS LAST, ${players.fpRank} ASC NULLS LAST, ${players.espnRank} ASC NULLS LAST, ${players.id} ASC`
+    );
     return results.map(enrichPlayer);
   }
 
@@ -187,8 +189,8 @@ export class DatabaseStorage implements IStorage {
     const myRoster = myRosterRaw.map(enrichPlayer);
 
     const orderByMode = mode === 'consensus'
-      ? asc(players.consensusRank)
-      : sql`COALESCE(${players.myRank}, ${players.consensusRank}) ASC`;
+      ? sql`${players.consensusRank} ASC NULLS LAST, ${players.fpRank} ASC NULLS LAST, ${players.espnRank} ASC NULLS LAST, ${players.id} ASC`
+      : sql`COALESCE(${players.myRank}, ${players.consensusRank}) ASC NULLS LAST, ${players.fpRank} ASC NULLS LAST, ${players.espnRank} ASC NULLS LAST, ${players.id} ASC`;
 
     const availAndTarget = await db.select().from(players)
       .where(and(eq(players.status, 'available'), sql`',' || ${players.tags} || ',' LIKE '%,target,%'`))
@@ -382,7 +384,28 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    await this.uniquifyConsensusRanks();
     return { updated, inserted, total: updated + inserted };
+  }
+
+  private async uniquifyConsensusRanks(): Promise<void> {
+    await db.execute(sql`
+      UPDATE players
+      SET consensus_rank = ranks.new_rank
+      FROM (
+        SELECT id, ROW_NUMBER() OVER (
+          ORDER BY
+            consensus_rank ASC NULLS LAST,
+            fp_rank ASC NULLS LAST,
+            espn_rank ASC NULLS LAST,
+            yahoo_rank ASC NULLS LAST,
+            id ASC
+        ) AS new_rank
+        FROM players
+        WHERE consensus_rank IS NOT NULL AND consensus_rank < 9000
+      ) AS ranks
+      WHERE players.id = ranks.id
+    `);
   }
 }
 
