@@ -12,16 +12,20 @@ import * as XLSX from "xlsx";
 
 // Position normalisation map
 const POS_MAP: Record<string, string> = {
-  OF1: "OF", OF2: "OF", OF3: "OF", OF4: "OF", OF5: "OF",
-  LF: "OF", CF: "OF", RF: "OF",
-  SP1: "SP", SP2: "SP", SP3: "SP", SP4: "SP", SP5: "SP",
-  RP1: "RP", RP2: "RP", RP3: "RP",
+  OF: "OF", LF: "OF", CF: "OF", RF: "OF",
+  DH: "DH", P: "P", UTIL: "UTIL",
 };
+
+const VALID_POS = new Set(["C", "1B", "2B", "3B", "SS", "OF", "SP", "RP", "DH", "P", "UTIL"]);
 
 function normalizePos(raw: string | null | undefined): string {
   if (!raw) return "UTIL";
-  const top = raw.trim().toUpperCase().split(",")[0].trim();
-  return POS_MAP[top] ?? top;
+  // Take the primary position (before any slash or comma)
+  const primary = raw.trim().toUpperCase().split(/[,\/]/)[0].trim();
+  // Strip trailing digits: "1B73" → "1B", "OF199" → "OF", "SP124" → "SP"
+  const stripped = primary.replace(/\d+$/, "");
+  const mapped = POS_MAP[stripped] ?? stripped;
+  return VALID_POS.has(mapped) ? mapped : "UTIL";
 }
 
 function normalizeName(name: string): string {
@@ -113,17 +117,27 @@ export function parseYahooBuffer(buffer: Buffer): Map<string, ParsedRankSource> 
 }
 
 // ── Consensus rank calculation ───────────────────────────────────────────────
+// Uses renormalized weights — missing sources are dropped rather than penalised.
+// Weights: FP 40%, ESPN 35%, Yahoo 25%
 export function calcConsensus(
   fpRank: number | null,
   espnRank: number | null,
   yahooRank: number | null,
-  maxRank = 300
+  _maxRank = 300  // kept for API compat, no longer used
 ): number {
-  const penalty = maxRank + 100;
-  const fp   = fpRank   ?? penalty;
-  const espn = espnRank ?? penalty;
-  const yahoo = yahooRank ?? penalty;
-  return Math.round(fp * 0.4 + espn * 0.35 + yahoo * 0.25);
+  const hasFP    = fpRank    != null;
+  const hasESPN  = espnRank  != null;
+  const hasYahoo = yahooRank != null;
+
+  const totalWeight = (hasFP ? 0.40 : 0) + (hasESPN ? 0.35 : 0) + (hasYahoo ? 0.25 : 0);
+  if (totalWeight === 0) return 9999;
+
+  const weighted =
+    (hasFP    ? fpRank!    * 0.40 : 0) +
+    (hasESPN  ? espnRank!  * 0.35 : 0) +
+    (hasYahoo ? yahooRank! * 0.25 : 0);
+
+  return Math.round(weighted / totalWeight);
 }
 
 export { normalizeName };

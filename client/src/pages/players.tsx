@@ -276,6 +276,7 @@ export default function Players() {
                 <th style={{ width: 44 }}>CON</th>
                 <th style={{ width: 38 }}>FP</th>
                 <th style={{ width: 44 }}>ESPN</th>
+                <th style={{ width: 44 }}>YHO</th>
                 <th style={{ minWidth: 160 }}>PLAYER</th>
                 <th style={{ width: 48 }}>POS</th>
                 <th style={{ width: 52 }}>TEAM</th>
@@ -300,6 +301,7 @@ export default function Players() {
                   </td>
                   <td style={{ color: 'var(--joyt-text-mid)', fontSize: 12 }}>{p.fpRank ?? '—'}</td>
                   <td style={{ color: 'var(--joyt-text-mid)', fontSize: 12 }}>{p.espnRank ?? '—'}</td>
+                  <td style={{ color: 'var(--joyt-text-mid)', fontSize: 12 }}>{p.yahooRank ?? '—'}</td>
                   <td>
                     <span style={{ fontWeight: 700, fontSize: 13 }} data-testid={`text-name-${p.id}`}>{p.name}</span>
                   </td>
@@ -328,7 +330,7 @@ export default function Players() {
               ))}
               {players.length === 0 && (
                 <tr>
-                  <td colSpan={13} style={{ textAlign: 'center', padding: 40, color: 'var(--joyt-text-light)' }}>
+                  <td colSpan={14} style={{ textAlign: 'center', padding: 40, color: 'var(--joyt-text-light)' }}>
                     No players match the current filters
                   </td>
                 </tr>
