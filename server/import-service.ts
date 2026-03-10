@@ -148,12 +148,13 @@ export function parseYahooBuffer(buffer: Buffer): Map<string, ParsedRankSource> 
     const rank = parseInt(row[rankCol]);
     const pos  = (row[posCol]  ?? "").toString().trim();
     const team = (row[teamCol] ?? "").toString().trim();
-    map.set(normalizeName(name), {
-      name,
-      rank: !isNaN(rank) ? rank : null,
-      team,
-      posDisplay: normalizePos(pos),
-    });
+    const rankVal = !isNaN(rank) ? rank : null;
+    const key = normalizeName(name);
+    const existing = map.get(key);
+    // Keep lowest rank if player appears twice (e.g. Ohtani listed as DH #2 AND SP #61)
+    if (!existing || (rankVal !== null && (existing.rank === null || rankVal < existing.rank))) {
+      map.set(key, { name, rank: rankVal, team, posDisplay: normalizePos(pos) });
+    }
   }
   console.log(`[Yahoo import] parsed ${map.size} players`);
   return map;

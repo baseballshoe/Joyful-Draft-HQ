@@ -231,21 +231,25 @@ export class DatabaseStorage implements IStorage {
         .orderBy(orderByMode);
       const forced = forcedRaw.map(enrichPlayer);
 
-      // Fill remaining spots with top natural picks for this round (not already forced into any round)
-      const naturalRaw = await db.select().from(players)
-        .where(and(
-          eq(players.status, 'available'),
-          sql`${players.roundOverride} IS NULL`,
-          sql`${players.consensusRank} >= ${pickStart}`,
-          sql`${players.consensusRank} <= ${pickEnd}`
-        ))
-        .orderBy(orderByMode)
-        .limit(5);
-      const natural = naturalRaw.map(enrichPlayer);
+      // Fill remaining spots so total is always 5
+      const naturalLimit = Math.max(0, 5 - forced.length);
+      let natural: ReturnType<typeof enrichPlayer>[] = [];
+      if (naturalLimit > 0) {
+        const naturalRaw = await db.select().from(players)
+          .where(and(
+            eq(players.status, 'available'),
+            sql`${players.roundOverride} IS NULL`,
+            sql`${players.consensusRank} >= ${pickStart}`,
+            sql`${players.consensusRank} <= ${pickEnd}`
+          ))
+          .orderBy(orderByMode)
+          .limit(naturalLimit);
+        natural = naturalRaw.map(enrichPlayer);
+      }
 
-      // Merge all and sort together by priority rank
+      // Merge and sort by priority rank — hard cap at 5
       const all = [...forced, ...natural].sort((a, b) => a.priorityRank - b.priorityRank);
-      roundData[r] = all;
+      roundData[r] = all.slice(0, 5);
     }
 
     const [nextBestRaw] = await db.select().from(players)
