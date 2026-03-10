@@ -26,6 +26,42 @@ function enrichPlayer(p: Player): EnrichedPlayer {
   };
 }
 
+// ── Roster slot assignment ──────────────────────────────────────────────────
+const SLOT_LIMITS: Record<string, number> = {
+  C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, OF: 4,
+  Util: 1, SP: 4, RP: 2, P: 3, BN: 5,
+};
+const HITTER_POS = new Set(['C', '1B', '2B', '3B', 'SS', 'OF', 'DH']);
+const PITCHER_POS = new Set(['SP', 'RP', 'P']);
+
+function computeRosterSlot(posDisplay: string, currentSlots: string[]): string {
+  const counts: Record<string, number> = {};
+  currentSlots.forEach((s) => { counts[s] = (counts[s] ?? 0) + 1; });
+  const avail = (slot: string) => (counts[slot] ?? 0) < (SLOT_LIMITS[slot] ?? 0);
+
+  // 1. Primary position slots
+  if (posDisplay === 'C'  && avail('C'))  return 'C';
+  if (posDisplay === '1B' && avail('1B')) return '1B';
+  if (posDisplay === '2B' && avail('2B')) return '2B';
+  if (posDisplay === '3B' && avail('3B')) return '3B';
+  if (posDisplay === 'SS' && avail('SS')) return 'SS';
+  if (posDisplay === 'OF' && avail('OF')) return 'OF';
+  if (posDisplay === 'SP' && avail('SP')) return 'SP';
+  if (posDisplay === 'RP' && avail('RP')) return 'RP';
+
+  // 2. SP/RP overflow → P slot
+  if ((posDisplay === 'SP' || posDisplay === 'RP') && avail('P')) return 'P';
+
+  // 3. Hitters (including DH) → Util
+  if (HITTER_POS.has(posDisplay) && avail('Util')) return 'Util';
+
+  // 4. Any remaining pitchers → P overflow
+  if (PITCHER_POS.has(posDisplay) && avail('P')) return 'P';
+
+  // 5. Bench
+  return 'BN';
+}
+
 export interface IStorage {
   // Draft State
   getDraftState(): Promise<DraftState>;
@@ -108,8 +144,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updatePlayer(id: number, updates: UpdatePlayerRequest): Promise<EnrichedPlayer> {
+    let finalUpdates: UpdatePlayerRequest & { rosterSlot?: string | null } = { ...updates };
+
+    if (updates.status === 'mine') {
+      // Get current roster slots (excluding this player)
+      const roster = await db.select({ rosterSlot: players.rosterSlot })
+        .from(players)
+        .where(and(eq(players.status, 'mine'), sql`${players.id} != ${id}`));
+      const currentSlots = roster.map((r) => r.rosterSlot).filter(Boolean) as string[];
+
+      // Get this player's posDisplay
+      const [current] = await db.select({ posDisplay: players.posDisplay }).from(players).where(eq(players.id, id));
+      if (current) {
+        finalUpdates.rosterSlot = computeRosterSlot(current.posDisplay, currentSlots);
+      }
+    } else if (updates.status && updates.status !== 'mine') {
+      finalUpdates.rosterSlot = null;
+    }
+
     const [updated] = await db.update(players)
-      .set({ ...updates, updatedAt: new Date() })
+      .set({ ...finalUpdates, updatedAt: new Date() })
       .where(eq(players.id, id))
       .returning();
     return enrichPlayer(updated);
@@ -117,7 +171,7 @@ export class DatabaseStorage implements IStorage {
 
   async resetPlayer(id: number): Promise<EnrichedPlayer> {
     const [updated] = await db.update(players)
-      .set({ status: 'available', myRank: null, myPosRank: null, roundOverride: null, tags: '', notes: '', updatedAt: new Date() })
+      .set({ status: 'available', rosterSlot: null, myRank: null, myPosRank: null, roundOverride: null, tags: '', notes: '', updatedAt: new Date() })
       .where(eq(players.id, id))
       .returning();
     return enrichPlayer(updated);
@@ -166,27 +220,31 @@ export class DatabaseStorage implements IStorage {
     }
 
     const roundData: Record<number, EnrichedPlayer[]> = {};
-    for (const r of [round - 1, round, round + 1].filter(x => x >= 1)) {
+    const rdStart = Math.max(1, round - 1);
+    for (const r of [rdStart, rdStart + 1, rdStart + 2, rdStart + 3]) {
       const pickStart = (r - 1) * 12 + 1;
       const pickEnd = r * 12;
 
-      const forcedRaw = await db.select().from(players)
-        .where(and(eq(players.status, 'available'), eq(players.roundOverride, r)))
-        .orderBy(orderByMode);
-      const forced = forcedRaw.map(enrichPlayer);
-
-      const naturalRaw = await db.select().from(players)
+      // Fetch ALL players that belong in this round:
+      //   - naturally ranked within pick range, OR
+      //   - explicitly assigned to this round via roundOverride
+      // Then sort all of them together by priority rank so overrides appear in proper rank order
+      const roundRaw = await db.select().from(players)
         .where(and(
           eq(players.status, 'available'),
-          or(sql`${players.roundOverride} IS NULL`, sql`${players.roundOverride} != ${r}`),
-          sql`${players.consensusRank} >= ${pickStart}`,
-          sql`${players.consensusRank} <= ${pickEnd}`
+          or(
+            eq(players.roundOverride, r),
+            and(
+              sql`${players.roundOverride} IS NULL`,
+              sql`${players.consensusRank} >= ${pickStart}`,
+              sql`${players.consensusRank} <= ${pickEnd}`
+            )
+          )
         ))
         .orderBy(orderByMode)
-        .limit(Math.max(0, 5 - forced.length));
-      const natural = naturalRaw.map(enrichPlayer);
+        .limit(5);
 
-      roundData[r] = [...forced, ...natural].slice(0, 5);
+      roundData[r] = roundRaw.map(enrichPlayer);
     }
 
     const [nextBestRaw] = await db.select().from(players)

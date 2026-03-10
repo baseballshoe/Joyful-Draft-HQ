@@ -18,6 +18,7 @@ export const players = pgTable("players", {
   roundOverride: integer("round_override"),
   tags: text("tags").default(''),
   status: text("status").default('available'),
+  rosterSlot: text("roster_slot"),
   notes: text("notes").default(''),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow()

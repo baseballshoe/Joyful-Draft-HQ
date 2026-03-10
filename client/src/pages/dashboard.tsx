@@ -128,8 +128,8 @@ const ROSTER_SLOTS = [
 function RosterSummary({ myRoster }: { myRoster: any[] }) {
   const counts: Record<string, number> = {};
   myRoster.forEach((p) => {
-    const pos = p.posDisplay;
-    counts[pos] = (counts[pos] ?? 0) + 1;
+    const slot = p.rosterSlot ?? p.posDisplay;
+    counts[slot] = (counts[slot] ?? 0) + 1;
   });
 
   return (
@@ -203,7 +203,8 @@ export default function Dashboard() {
   );
 
   const round = draftState?.currentRound ?? data.state?.currentRound ?? 1;
-  const roundNums = [round - 1, round, round + 1].filter((r) => r >= 1);
+  const start = Math.max(1, round - 1);
+  const roundNums = [start, start + 1, start + 2, start + 3];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>

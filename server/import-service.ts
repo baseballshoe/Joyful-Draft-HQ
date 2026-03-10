@@ -113,7 +113,24 @@ export function parseESPNBuffer(buffer: Buffer): Map<string, ParsedRankSource> {
 }
 
 export function parseYahooBuffer(buffer: Buffer): Map<string, ParsedRankSource> {
-  return parseXLSXBuffer(buffer, "Rank", "Name", "Team", "Position");
+  // Yahoo files use various column headers — try each known variant
+  const wb = XLSX.read(buffer, { type: "buffer" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: null });
+  if (rows.length === 0) return new Map();
+
+  const sampleRow = rows[0];
+  const keys = Object.keys(sampleRow);
+
+  const findCol = (...candidates: string[]) =>
+    candidates.find((c) => keys.some((k) => k.toLowerCase() === c.toLowerCase())) ?? candidates[0];
+
+  const rankCol   = findCol("Rank", "Overall Rank", "Rank #", "#");
+  const nameCol   = findCol("Name", "Player Name", "Player", "Full Name");
+  const teamCol   = findCol("Team", "Team Abbrev", "Team Name", "NFL Team");
+  const posCol    = findCol("Position", "Eligible Positions", "Pos", "Primary Position");
+
+  return parseXLSXBuffer(buffer, rankCol, nameCol, teamCol, posCol);
 }
 
 // ── Consensus rank calculation ───────────────────────────────────────────────
