@@ -72,6 +72,7 @@ export interface IStorage {
   getPlayer(id: number): Promise<EnrichedPlayer | undefined>;
   updatePlayer(id: number, updates: UpdatePlayerRequest): Promise<EnrichedPlayer>;
   resetPlayer(id: number): Promise<EnrichedPlayer>;
+  recalculateConsensusRanks(): Promise<void>;
 
   // Dashboard
   getDashboardData(): Promise<DashboardData>;
@@ -396,6 +397,21 @@ export class DatabaseStorage implements IStorage {
 
     await this.uniquifyConsensusRanks();
     return { updated, inserted, total: updated + inserted };
+  }
+
+  async recalculateConsensusRanks(): Promise<void> {
+    // Recompute consensus = avg(fpRank, espnRank) — Yahoo is excluded
+    await db.execute(sql`
+      UPDATE players
+      SET consensus_rank = CASE
+        WHEN fp_rank IS NOT NULL AND espn_rank IS NOT NULL
+          THEN ROUND((fp_rank::numeric + espn_rank::numeric) / 2)
+        WHEN fp_rank IS NOT NULL  THEN fp_rank
+        WHEN espn_rank IS NOT NULL THEN espn_rank
+        ELSE 9999
+      END
+    `);
+    await this.uniquifyConsensusRanks();
   }
 
   private async uniquifyConsensusRanks(): Promise<void> {

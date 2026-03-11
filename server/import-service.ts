@@ -161,27 +161,20 @@ export function parseYahooBuffer(buffer: Buffer): Map<string, ParsedRankSource> 
 }
 
 // ── Consensus rank calculation ───────────────────────────────────────────────
-// Uses renormalized weights — missing sources are dropped rather than penalised.
-// Weights: FP 40%, ESPN 35%, Yahoo 25%
+// FP and ESPN weighted equally (50/50). Yahoo is stored for reference only
+// and does NOT factor into the consensus or #RNK calculation.
 export function calcConsensus(
   fpRank: number | null,
   espnRank: number | null,
-  yahooRank: number | null,
-  _maxRank = 300  // kept for API compat, no longer used
+  _yahooRank: number | null,  // kept for API compat — intentionally ignored
+  _maxRank = 300
 ): number {
-  const hasFP    = fpRank    != null;
-  const hasESPN  = espnRank  != null;
-  const hasYahoo = yahooRank != null;
+  const hasFP   = fpRank   != null;
+  const hasESPN = espnRank != null;
 
-  const totalWeight = (hasFP ? 0.40 : 0) + (hasESPN ? 0.35 : 0) + (hasYahoo ? 0.25 : 0);
-  if (totalWeight === 0) return 9999;
-
-  const weighted =
-    (hasFP    ? fpRank!    * 0.40 : 0) +
-    (hasESPN  ? espnRank!  * 0.35 : 0) +
-    (hasYahoo ? yahooRank! * 0.25 : 0);
-
-  return Math.round(weighted / totalWeight);
+  if (!hasFP && !hasESPN) return 9999;
+  if (hasFP && hasESPN) return Math.round((fpRank! + espnRank!) / 2);
+  return hasFP ? fpRank! : espnRank!;
 }
 
 export { normalizeName };

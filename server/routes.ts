@@ -76,8 +76,10 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
-  // Run seed
-  seedDatabase().catch(console.error);
+  // Run seed then recalculate consensus (FP+ESPN avg, Yahoo excluded)
+  seedDatabase()
+    .then(() => storage.recalculateConsensusRanks())
+    .catch(console.error);
 
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
