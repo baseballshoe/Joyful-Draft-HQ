@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 import { PosBadge, TagPill, ActionBtns, Card } from '@/components/game-ui';
 import { useDraftState } from '@/hooks/use-draft';
@@ -48,12 +48,13 @@ function PlayerListRow({ player, rank, accentColor, onUpdate }: any) {
 }
 
 // ── Round chips ───────────────────────────────────────────────────────────
-function RoundChip({ player, onUpdate }: any) {
+function RoundChip({ player, onUpdate, chipWidth }: any) {
   const tags: string[] = player.tagsArray ?? [];
   return (
     <div style={{
       background: 'var(--joyt-surface)', borderRadius: 8,
-      padding: '8px 6px', minWidth: 0,
+      padding: '8px 6px', flexShrink: 0,
+      width: chipWidth, minWidth: 0, overflow: 'hidden',
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <PosBadge pos={player.posDisplay} style={{ fontSize: 9 }} />
@@ -76,6 +77,33 @@ function RoundChip({ player, onUpdate }: any) {
       )}
       <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
         <ActionBtns player={player} onUpdate={onUpdate} size="sm" />
+      </div>
+    </div>
+  );
+}
+
+// ── Round chip row — measures its own width so chips always fill exactly ──
+const GAP = 4;
+const VISIBLE = 5;
+function RoundChipRow({ players, onUpdate }: { players: any[]; onUpdate: () => void }) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [chipWidth, setChipWidth] = useState(116);
+
+  useEffect(() => {
+    if (!viewportRef.current) return;
+    const calc = (w: number) => Math.floor((w - GAP * (VISIBLE - 1)) / VISIBLE);
+    setChipWidth(calc(viewportRef.current.clientWidth));
+    const obs = new ResizeObserver(([entry]) => setChipWidth(calc(entry.contentRect.width)));
+    obs.observe(viewportRef.current);
+    return () => obs.disconnect();
+  }, []);
+
+  return (
+    <div ref={viewportRef} style={{ overflowX: 'auto', width: '100%', paddingBottom: 4 }}>
+      <div style={{ display: 'flex', gap: GAP }}>
+        {players.map((p: any) => (
+          <RoundChip key={p.id} player={p} onUpdate={onUpdate} chipWidth={chipWidth} />
+        ))}
       </div>
     </div>
   );
@@ -310,7 +338,6 @@ export default function Dashboard() {
               const pickEnd = r * 12;
               return (
                 <div key={r}>
-                  {/* Round label — horizontally padded so it doesn't hug the card edge */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, padding: '0 10px' }}>
                     <span style={{
                       background: 'var(--joyt-blue-light)', color: 'var(--joyt-blue)',
@@ -318,20 +345,10 @@ export default function Dashboard() {
                     }}>ROUND {r}</span>
                     <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>picks {pickStart}-{pickEnd}</span>
                   </div>
-                  {/* Grid has no horizontal padding so width:100% = full card width; chips fill exactly */}
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: `repeat(${Math.max(players.length, 1)}, calc(20% - 3.2px))`,
-                    gap: 4,
-                    overflowX: 'auto',
-                    width: '100%',
-                    paddingBottom: 4,
-                  }}>
-                    {players.length === 0
-                      ? <span style={{ fontSize: 11, color: 'var(--joyt-text-light)', padding: '0 10px' }}>No players available this round</span>
-                      : players.map((p: any) => <RoundChip key={p.id} player={p} onUpdate={handlePlayerUpdate} />)
-                    }
-                  </div>
+                  {players.length === 0
+                    ? <span style={{ fontSize: 11, color: 'var(--joyt-text-light)', padding: '0 10px' }}>No players available this round</span>
+                    : <RoundChipRow players={players} onUpdate={handlePlayerUpdate} />
+                  }
                 </div>
               );
             })}
