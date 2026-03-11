@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 
 // ── Position badge ─────────────────────────────────────────────────────────
@@ -151,8 +152,14 @@ interface EditableRankProps {
 }
 
 export function EditableRank({ value, playerId, field, color = 'amber', onSave }: EditableRankProps) {
-  async function handleBlur(e: React.FocusEvent<HTMLInputElement>) {
-    const v = parseInt(e.target.value);
+  const [local, setLocal] = useState<string>(value != null ? String(value) : '');
+
+  useEffect(() => {
+    setLocal(value != null ? String(value) : '');
+  }, [value]);
+
+  async function handleBlur() {
+    const v = parseInt(local);
     const val = isNaN(v) ? null : v;
     const updated = await api.patchPlayer(playerId, { [field]: val });
     onSave?.(updated);
@@ -160,7 +167,8 @@ export function EditableRank({ value, playerId, field, color = 'amber', onSave }
   return (
     <input
       className={`editable-cell ${color}`}
-      defaultValue={value ?? ''}
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
       placeholder="—"
       type="number"
       min="1"
