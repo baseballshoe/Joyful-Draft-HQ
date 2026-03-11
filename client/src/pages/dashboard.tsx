@@ -85,15 +85,13 @@ function RoundChip({ player, onUpdate, chipWidth }: any) {
 // ── Round chip row — measures its own width so chips always fill exactly ──
 const GAP = 4;
 const VISIBLE = 5;
-const SIDE_PAD = 10;
 function RoundChipRow({ players, onUpdate }: { players: any[]; onUpdate: () => void }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [chipWidth, setChipWidth] = useState(116);
 
   useLayoutEffect(() => {
     if (!viewportRef.current) return;
-    // Subtract side padding so chips fill only the content area
-    const calc = (w: number) => w > 20 ? Math.floor((w - SIDE_PAD * 2 - GAP * (VISIBLE - 1)) / VISIBLE) : 116;
+    const calc = (w: number) => w > 20 ? Math.floor((w - GAP * (VISIBLE - 1)) / VISIBLE) : 116;
     const measure = () => {
       const w = viewportRef.current?.getBoundingClientRect().width ?? 0;
       setChipWidth(calc(w));
@@ -104,13 +102,21 @@ function RoundChipRow({ players, onUpdate }: { players: any[]; onUpdate: () => v
     return () => obs.disconnect();
   }, []);
 
+  const scroll = (dir: -1 | 1) => {
+    viewportRef.current?.scrollBy({ left: dir * (chipWidth + GAP) * VISIBLE, behavior: 'smooth' });
+  };
+
   return (
-    <div ref={viewportRef} style={{ overflowX: 'auto', width: '100%', padding: `0 ${SIDE_PAD}px 4px` }}>
-      <div style={{ display: 'flex', gap: GAP }}>
-        {players.map((p: any) => (
-          <RoundChip key={p.id} player={p} onUpdate={onUpdate} chipWidth={chipWidth} />
-        ))}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '0 8px 4px' }}>
+      <button className="scroll-nav-btn" onClick={() => scroll(-1)}>‹</button>
+      <div ref={viewportRef} className="no-scrollbar" style={{ flex: 1, overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: GAP }}>
+          {players.map((p: any) => (
+            <RoundChip key={p.id} player={p} onUpdate={onUpdate} chipWidth={chipWidth} />
+          ))}
+        </div>
       </div>
+      <button className="scroll-nav-btn" onClick={() => scroll(1)}>›</button>
     </div>
   );
 }
@@ -247,6 +253,7 @@ function BestByPos({ bestByPos, onUpdate }: { bestByPos: Record<string, any>; on
 export default function Dashboard() {
   const [data, setData] = useState<any>(null);
   const { data: draftState } = useDraftState();
+  const picksScrollRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     const d = await api.getDashboard();
@@ -278,8 +285,7 @@ export default function Dashboard() {
     <div style={{ padding: 40, color: 'var(--joyt-text-mid)' }}>Loading…</div>
   );
 
-  const start = Math.max(1, round - 1);
-  const roundNums = [start, start + 1, start + 2, start + 3];
+  const roundNums = Array.from({ length: 20 }, (_, i) => i + 1);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -316,9 +322,10 @@ export default function Dashboard() {
         )}
 
         {/* My pick schedule */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0, overflow: 'hidden', padding: '0 8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 1, minWidth: 0 }}>
           <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--joyt-text-light)', textTransform: 'uppercase', letterSpacing: '.06em', flexShrink: 0 }}>My Picks</span>
-          <div style={{ display: 'flex', gap: 3, overflowX: 'auto' }}>
+          <button className="scroll-nav-btn" onClick={() => picksScrollRef.current?.scrollBy({ left: -160, behavior: 'smooth' })}>‹</button>
+          <div ref={picksScrollRef} className="no-scrollbar" style={{ display: 'flex', gap: 3, overflowX: 'auto' }}>
             {MY_PICKS.map((pick, i) => {
               const roundNum = i + 1;
               const isCurrent = roundNum === round;
@@ -341,6 +348,7 @@ export default function Dashboard() {
               );
             })}
           </div>
+          <button className="scroll-nav-btn" onClick={() => picksScrollRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}>›</button>
         </div>
 
         <div style={{ flex: 1 }} />

@@ -381,3 +381,27 @@ select:focus { box-shadow: 0 0 0 2px var(--joyt-indigo); }
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 }
+
+/* ── Scroll nav buttons ── */
+.scroll-nav-btn {
+  background: var(--joyt-surface);
+  border: 1px solid var(--joyt-border);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 15px;
+  color: var(--joyt-text-mid);
+  flex-shrink: 0;
+  line-height: 1;
+  padding: 0;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.scroll-nav-btn:hover {
+  background: var(--joyt-indigo-light);
+  color: var(--joyt-indigo);
+  border-color: var(--joyt-indigo);
+}

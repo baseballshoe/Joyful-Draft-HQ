@@ -228,35 +228,36 @@ export class DatabaseStorage implements IStorage {
       bestByPos[pos] = best ? enrichPlayer(best) : null;
     }
 
+    // Bulk-fetch all 20 rounds in 2 queries instead of 40
+    const allForcedRaw = await db.select().from(players)
+      .where(and(
+        eq(players.status, 'available'),
+        sql`${players.roundOverride} >= 1`,
+        sql`${players.roundOverride} <= 20`
+      ))
+      .orderBy(orderByMode);
+    const allForced = allForcedRaw.map(enrichPlayer);
+
+    const allNaturalRaw = await db.select().from(players)
+      .where(and(
+        eq(players.status, 'available'),
+        sql`${players.roundOverride} IS NULL`,
+        sql`COALESCE(${players.myRank}, ${players.consensusRank}) >= 1`,
+        sql`COALESCE(${players.myRank}, ${players.consensusRank}) <= 240`
+      ))
+      .orderBy(orderByMode)
+      .limit(240);
+    const allNatural = allNaturalRaw.map(enrichPlayer);
+
     const roundData: Record<number, EnrichedPlayer[]> = {};
-    const rdStart = Math.max(1, round - 1);
-    for (const r of [rdStart, rdStart + 1, rdStart + 2, rdStart + 3]) {
+    for (let r = 1; r <= 20; r++) {
       const pickStart = (r - 1) * 12 + 1;
       const pickEnd = r * 12;
-
-      // Always include ALL players explicitly forced into this round (no limit)
-      const forcedRaw = await db.select().from(players)
-        .where(and(eq(players.status, 'available'), eq(players.roundOverride, r)))
-        .orderBy(orderByMode);
-      const forced = forcedRaw.map(enrichPlayer);
-
-      // Fill remaining spots so total is always 12 (full round)
-      const naturalLimit = Math.max(0, 12 - forced.length);
-      let natural: ReturnType<typeof enrichPlayer>[] = [];
-      if (naturalLimit > 0) {
-        const naturalRaw = await db.select().from(players)
-          .where(and(
-            eq(players.status, 'available'),
-            sql`${players.roundOverride} IS NULL`,
-            sql`COALESCE(${players.myRank}, ${players.consensusRank}) >= ${pickStart}`,
-            sql`COALESCE(${players.myRank}, ${players.consensusRank}) <= ${pickEnd}`
-          ))
-          .orderBy(orderByMode)
-          .limit(naturalLimit);
-        natural = naturalRaw.map(enrichPlayer);
-      }
-
-      // Merge and sort by priority rank — hard cap at 12
+      const forced = allForced.filter(p => p.roundOverride === r);
+      const needed = Math.max(0, 12 - forced.length);
+      const natural = allNatural
+        .filter(p => p.priorityRank >= pickStart && p.priorityRank <= pickEnd)
+        .slice(0, needed);
       const all = [...forced, ...natural].sort((a, b) => a.priorityRank - b.priorityRank);
       roundData[r] = all.slice(0, 12);
     }
