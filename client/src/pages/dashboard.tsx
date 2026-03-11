@@ -85,13 +85,15 @@ function RoundChip({ player, onUpdate, chipWidth }: any) {
 // ── Round chip row — measures its own width so chips always fill exactly ──
 const GAP = 4;
 const VISIBLE = 5;
+const SIDE_PAD = 10;
 function RoundChipRow({ players, onUpdate }: { players: any[]; onUpdate: () => void }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [chipWidth, setChipWidth] = useState(116);
 
   useLayoutEffect(() => {
     if (!viewportRef.current) return;
-    const calc = (w: number) => w > 20 ? Math.floor((w - GAP * (VISIBLE - 1)) / VISIBLE) : 116;
+    // Subtract side padding so chips fill only the content area
+    const calc = (w: number) => w > 20 ? Math.floor((w - SIDE_PAD * 2 - GAP * (VISIBLE - 1)) / VISIBLE) : 116;
     const measure = () => {
       const w = viewportRef.current?.getBoundingClientRect().width ?? 0;
       setChipWidth(calc(w));
@@ -103,7 +105,7 @@ function RoundChipRow({ players, onUpdate }: { players: any[]; onUpdate: () => v
   }, []);
 
   return (
-    <div ref={viewportRef} style={{ overflowX: 'auto', width: '100%', paddingBottom: 4 }}>
+    <div ref={viewportRef} style={{ overflowX: 'auto', width: '100%', padding: `0 ${SIDE_PAD}px 4px` }}>
       <div style={{ display: 'flex', gap: GAP }}>
         {players.map((p: any) => (
           <RoundChip key={p.id} player={p} onUpdate={onUpdate} chipWidth={chipWidth} />
