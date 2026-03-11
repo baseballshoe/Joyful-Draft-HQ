@@ -253,6 +253,21 @@ export default function Dashboard() {
 
   useEffect(() => { load(); }, [load]);
 
+  const round = draftState?.currentRound ?? data?.state?.currentRound ?? 1;
+
+  const prevRoundRef = useRef(round);
+  useEffect(() => {
+    if (prevRoundRef.current !== round) {
+      prevRoundRef.current = round;
+      load();
+    }
+  }, [round, load]);
+
+  useEffect(() => {
+    const timer = setInterval(load, 30 * 1000);
+    return () => clearInterval(timer);
+  }, [load]);
+
   function handlePlayerUpdate() {
     load();
   }
@@ -261,7 +276,6 @@ export default function Dashboard() {
     <div style={{ padding: 40, color: 'var(--joyt-text-mid)' }}>Loading…</div>
   );
 
-  const round = draftState?.currentRound ?? data.state?.currentRound ?? 1;
   const start = Math.max(1, round - 1);
   const roundNums = [start, start + 1, start + 2, start + 3];
 
@@ -342,7 +356,7 @@ export default function Dashboard() {
         flex: 1, overflowY: 'auto', padding: 8,
         display: 'grid',
         gridTemplateColumns: '184px 190px 1fr 172px',
-        gridTemplateRows: 'auto 1fr',
+        gridTemplateRows: '1fr 1fr',
         gap: 8,
       }}>
 
@@ -367,8 +381,9 @@ export default function Dashboard() {
 
         {/* Col C Row 1: Current Rounds */}
         <Card accent="var(--joyt-blue)" title="Best Available — Current Rounds"
-          style={{ gridColumn: 3, gridRow: 1, overflow: 'hidden' }}>
-          <div style={{ padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          style={{ gridColumn: 3, gridRow: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+          bodyStyle={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {roundNums.map((r) => {
               const players = (data.roundData ?? {})[r] ?? [];
               const pickStart = (r - 1) * 12 + 1;

@@ -10,6 +10,7 @@ export function useDraftState() {
       if (!res.ok) throw new Error("Failed to fetch draft state");
       return await res.json();
     },
+    refetchInterval: 10 * 1000,
   });
 }
 
