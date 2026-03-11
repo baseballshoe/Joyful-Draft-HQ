@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 import { PosBadge, TagPill, ActionBtns, Card } from '@/components/game-ui';
 import { useDraftState } from '@/hooks/use-draft';
@@ -89,11 +89,15 @@ function RoundChipRow({ players, onUpdate }: { players: any[]; onUpdate: () => v
   const viewportRef = useRef<HTMLDivElement>(null);
   const [chipWidth, setChipWidth] = useState(116);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!viewportRef.current) return;
-    const calc = (w: number) => Math.floor((w - GAP * (VISIBLE - 1)) / VISIBLE);
-    setChipWidth(calc(viewportRef.current.clientWidth));
-    const obs = new ResizeObserver(([entry]) => setChipWidth(calc(entry.contentRect.width)));
+    const calc = (w: number) => w > 20 ? Math.floor((w - GAP * (VISIBLE - 1)) / VISIBLE) : 116;
+    const measure = () => {
+      const w = viewportRef.current?.getBoundingClientRect().width ?? 0;
+      setChipWidth(calc(w));
+    };
+    measure();
+    const obs = new ResizeObserver(measure);
     obs.observe(viewportRef.current);
     return () => obs.disconnect();
   }, []);
