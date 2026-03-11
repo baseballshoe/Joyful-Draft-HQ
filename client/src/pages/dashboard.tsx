@@ -303,21 +303,22 @@ export default function Dashboard() {
         {/* Col C Row 1: Current Rounds */}
         <Card accent="var(--joyt-blue)" title="Best Available — Current Rounds"
           style={{ gridColumn: 3, gridRow: 1, overflow: 'hidden' }}>
-          <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {roundNums.map((r) => {
               const players = (data.roundData ?? {})[r] ?? [];
               const pickStart = (r - 1) * 12 + 1;
               const pickEnd = r * 12;
               return (
                 <div key={r}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  {/* Round label — horizontally padded so it doesn't hug the card edge */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, padding: '0 10px' }}>
                     <span style={{
                       background: 'var(--joyt-blue-light)', color: 'var(--joyt-blue)',
                       fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 5,
                     }}>ROUND {r}</span>
                     <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>picks {pickStart}-{pickEnd}</span>
                   </div>
-                  {/* CSS Grid: % column widths resolve reliably against explicit width:100% */}
+                  {/* Grid has no horizontal padding so width:100% = full card width; chips fill exactly */}
                   <div style={{
                     display: 'grid',
                     gridTemplateColumns: `repeat(${Math.max(players.length, 1)}, calc(20% - 3.2px))`,
@@ -327,7 +328,7 @@ export default function Dashboard() {
                     paddingBottom: 4,
                   }}>
                     {players.length === 0
-                      ? <span style={{ fontSize: 11, color: 'var(--joyt-text-light)' }}>No players available this round</span>
+                      ? <span style={{ fontSize: 11, color: 'var(--joyt-text-light)', padding: '0 10px' }}>No players available this round</span>
                       : players.map((p: any) => <RoundChip key={p.id} player={p} onUpdate={handlePlayerUpdate} />)
                     }
                   </div>
