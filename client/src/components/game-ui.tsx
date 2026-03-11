@@ -63,6 +63,10 @@ export function ActionBtns({ player, onUpdate, size = 'sm' }: ActionBtnsProps) {
     const updated = await api.patchPlayer(player.id, { status: 'drafted' });
     onUpdate?.(updated);
   }
+  async function handleAvailable() {
+    const updated = await api.patchPlayer(player.id, { status: 'available' });
+    onUpdate?.(updated);
+  }
   async function handleReset() {
     const updated = await api.resetPlayer(player.id);
     onUpdate?.(updated);
@@ -70,10 +74,19 @@ export function ActionBtns({ player, onUpdate, size = 'sm' }: ActionBtnsProps) {
 
   if (player.status === 'mine' || player.status === 'drafted') {
     return (
-      <button className="btn btn-reset" style={btnStyle} onClick={handleReset}
-        data-testid={`btn-reset-${player.id}`}>
-        ↺ Reset
-      </button>
+      <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <button className="btn btn-reset" style={btnStyle} onClick={handleAvailable}
+          title="Mark available (keeps custom ranks & tags)"
+          data-testid={`btn-available-${player.id}`}>
+          ↺ Available
+        </button>
+        <button className="btn" style={{ ...btnStyle, background: 'var(--joyt-surface)', color: 'var(--joyt-text-light)', border: '1px solid var(--joyt-border)' }}
+          onClick={handleReset}
+          title="Full reset — clears all custom data"
+          data-testid={`btn-reset-${player.id}`}>
+          Reset All
+        </button>
+      </span>
     );
   }
   return (
