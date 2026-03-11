@@ -233,8 +233,8 @@ export class DatabaseStorage implements IStorage {
         .orderBy(orderByMode);
       const forced = forcedRaw.map(enrichPlayer);
 
-      // Fill remaining spots so total is always 5
-      const naturalLimit = Math.max(0, 5 - forced.length);
+      // Fill remaining spots so total is always 12 (full round)
+      const naturalLimit = Math.max(0, 12 - forced.length);
       let natural: ReturnType<typeof enrichPlayer>[] = [];
       if (naturalLimit > 0) {
         const naturalRaw = await db.select().from(players)
@@ -249,9 +249,9 @@ export class DatabaseStorage implements IStorage {
         natural = naturalRaw.map(enrichPlayer);
       }
 
-      // Merge and sort by priority rank — hard cap at 5
+      // Merge and sort by priority rank — hard cap at 12
       const all = [...forced, ...natural].sort((a, b) => a.priorityRank - b.priorityRank);
-      roundData[r] = all.slice(0, 5);
+      roundData[r] = all.slice(0, 12);
     }
 
     const [nextBestRaw] = await db.select().from(players)

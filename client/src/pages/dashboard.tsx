@@ -53,7 +53,7 @@ function RoundChip({ player, onUpdate }: any) {
   return (
     <div style={{
       background: 'var(--joyt-surface)', borderRadius: 8,
-      padding: '8px 6px', flex: 1, minWidth: 0,
+      padding: '8px 6px', width: 110, flexShrink: 0,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <PosBadge pos={player.posDisplay} style={{ fontSize: 9 }} />
@@ -313,7 +313,10 @@ export default function Dashboard() {
                     }}>ROUND {r}</span>
                     <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>picks {pickStart}-{pickEnd}</span>
                   </div>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <div style={{
+                    display: 'flex', gap: 4,
+                    overflowX: 'auto', paddingBottom: 4,
+                  }}>
                     {players.length === 0
                       ? <span style={{ fontSize: 11, color: 'var(--joyt-text-light)' }}>No players available this round</span>
                       : players.map((p: any) => <RoundChip key={p.id} player={p} onUpdate={handlePlayerUpdate} />)
