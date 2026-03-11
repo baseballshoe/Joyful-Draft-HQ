@@ -53,7 +53,7 @@ function RoundChip({ player, onUpdate }: any) {
   return (
     <div style={{
       background: 'var(--joyt-surface)', borderRadius: 8,
-      padding: '8px 6px', flex: '0 0 calc((100% - 16px) / 5)', minWidth: 0,
+      padding: '8px 6px', minWidth: 0,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <PosBadge pos={player.posDisplay} style={{ fontSize: 9 }} />
@@ -317,8 +317,15 @@ export default function Dashboard() {
                     }}>ROUND {r}</span>
                     <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>picks {pickStart}-{pickEnd}</span>
                   </div>
-                  {/* Flex container doubles as scroll viewport; width:100% makes it definite so chip % calc resolves correctly */}
-                  <div style={{ display: 'flex', gap: 4, overflowX: 'auto', width: '100%', paddingBottom: 4 }}>
+                  {/* CSS Grid: % column widths resolve reliably against explicit width:100% */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(${Math.max(players.length, 1)}, calc(20% - 3.2px))`,
+                    gap: 4,
+                    overflowX: 'auto',
+                    width: '100%',
+                    paddingBottom: 4,
+                  }}>
                     {players.length === 0
                       ? <span style={{ fontSize: 11, color: 'var(--joyt-text-light)' }}>No players available this round</span>
                       : players.map((p: any) => <RoundChip key={p.id} player={p} onUpdate={handlePlayerUpdate} />)
