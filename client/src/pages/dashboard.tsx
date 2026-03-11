@@ -53,7 +53,7 @@ function RoundChip({ player, onUpdate }: any) {
   return (
     <div style={{
       background: 'var(--joyt-surface)', borderRadius: 8,
-      padding: '8px 6px', width: 116, flexShrink: 0,
+      padding: '8px 6px', flex: '0 0 calc((100% - 16px) / 5)', minWidth: 0,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <PosBadge pos={player.posDisplay} style={{ fontSize: 9 }} />
@@ -64,6 +64,10 @@ function RoundChip({ player, onUpdate }: any) {
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--joyt-text)',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {player.name}
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--joyt-text-light)', marginTop: 1,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {player.team}
       </div>
       {tags.length > 0 && (
         <div style={{ display: 'flex', gap: 3, marginTop: 4, flexWrap: 'wrap' }}>
@@ -313,14 +317,12 @@ export default function Dashboard() {
                     }}>ROUND {r}</span>
                     <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>picks {pickStart}-{pickEnd}</span>
                   </div>
-                  {/* Scroll viewport — hard-width so exactly 5 chips show */}
-                  <div style={{ overflowX: 'auto', width: 'min(596px, 100%)', paddingBottom: 4 }}>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      {players.length === 0
-                        ? <span style={{ fontSize: 11, color: 'var(--joyt-text-light)' }}>No players available this round</span>
-                        : players.map((p: any) => <RoundChip key={p.id} player={p} onUpdate={handlePlayerUpdate} />)
-                      }
-                    </div>
+                  {/* Flex container doubles as scroll viewport; width:100% makes it definite so chip % calc resolves correctly */}
+                  <div style={{ display: 'flex', gap: 4, overflowX: 'auto', width: '100%', paddingBottom: 4 }}>
+                    {players.length === 0
+                      ? <span style={{ fontSize: 11, color: 'var(--joyt-text-light)' }}>No players available this round</span>
+                      : players.map((p: any) => <RoundChip key={p.id} player={p} onUpdate={handlePlayerUpdate} />)
+                    }
                   </div>
                 </div>
               );
