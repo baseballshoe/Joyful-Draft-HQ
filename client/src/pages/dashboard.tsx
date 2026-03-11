@@ -53,7 +53,7 @@ function RoundChip({ player, onUpdate }: any) {
   return (
     <div style={{
       background: 'var(--joyt-surface)', borderRadius: 8,
-      padding: '8px 6px', width: 110, flexShrink: 0,
+      padding: '8px 6px', flex: '0 0 calc((100% - 16px) / 5)',
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <PosBadge pos={player.posDisplay} style={{ fontSize: 9 }} />
