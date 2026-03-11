@@ -144,19 +144,21 @@ function QuickMark({ onUpdate }: { onUpdate: () => void }) {
           <div key={p.id} style={{
             padding: '6px 10px', borderBottom: '1px solid var(--joyt-border)',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
               <PosBadge pos={p.posDisplay} style={{ fontSize: 9 }} />
               <span style={{ flex: 1, fontSize: 12, fontWeight: 700, minWidth: 0,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {p.name}
               </span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--joyt-amber)', marginRight: 4 }}>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 2 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--joyt-amber)', marginRight: 2 }}>
                 #{Math.round(p.priorityRank)}
               </span>
               <ActionBtns player={p} onUpdate={onUpdate} size="sm" />
             </div>
             {(p.tagsArray ?? []).length > 0 && (
-              <div style={{ display: 'flex', gap: 3, marginTop: 3, marginLeft: 22, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 3, marginTop: 3, marginLeft: 2, flexWrap: 'wrap' }}>
                 {(p.tagsArray ?? []).map((t: string) => <TagPill key={t} tag={t} />)}
               </div>
             )}
@@ -253,7 +255,7 @@ export default function Dashboard() {
 
   useEffect(() => { load(); }, [load]);
 
-  const round = draftState?.currentRound ?? data?.state?.currentRound ?? 1;
+  const round = data?.dynamicRound ?? draftState?.currentRound ?? data?.state?.currentRound ?? 1;
 
   const prevRoundRef = useRef(round);
   useEffect(() => {
@@ -290,7 +292,7 @@ export default function Dashboard() {
       }}>
         <StatChip label="Round"    value={round}                   color="var(--joyt-indigo)" bg="var(--joyt-indigo-light)" />
         <StatChip label="My Picks" value={data.myRoster?.length ?? 0}   color="var(--joyt-green)"  bg="var(--joyt-green-light)"  />
-        <StatChip label="Drafted"  value={data.state?.drafted ?? '—'}   color="var(--joyt-text-mid)" bg="var(--joyt-surface)" />
+        <StatChip label="Drafted"  value={data.totalDrafted ?? 0}        color="var(--joyt-text-mid)" bg="var(--joyt-surface)" />
 
         {/* Next best */}
         {data.nextBest && (

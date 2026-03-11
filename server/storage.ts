@@ -182,7 +182,14 @@ export class DatabaseStorage implements IStorage {
   async getDashboardData(): Promise<DashboardData> {
     const state = await this.getDraftState();
     const mode = state.rankMode ?? 'priority';
-    const round = state.currentRound ?? 1;
+
+    const [{ count: draftedCount }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(players)
+      .where(sql`${players.status} != 'available'`);
+    const totalDrafted = draftedCount ?? 0;
+    const dynamicRound = Math.max(1, Math.ceil(totalDrafted / 12));
+    const round = dynamicRound;
 
     // We can fetch everything directly or do multiple queries. Let's do multiple simple queries.
     const myRosterRaw = await db.select().from(players).where(eq(players.status, 'mine')).orderBy(asc(players.updatedAt));
@@ -267,7 +274,9 @@ export class DatabaseStorage implements IStorage {
       top5,
       bestByPos,
       roundData,
-      nextBest: nextBestRaw ? enrichPlayer(nextBestRaw) : null
+      nextBest: nextBestRaw ? enrichPlayer(nextBestRaw) : null,
+      totalDrafted,
+      dynamicRound,
     };
   }
 

@@ -80,4 +80,6 @@ export type DashboardData = {
   bestByPos: Record<string, EnrichedPlayer | null>;
   roundData: Record<number, EnrichedPlayer[]>;
   nextBest: EnrichedPlayer | null;
+  totalDrafted: number;
+  dynamicRound: number;
 };
