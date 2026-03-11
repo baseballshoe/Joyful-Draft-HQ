@@ -202,6 +202,9 @@ function RosterSummary({ myRoster }: { myRoster: any[] }) {
   );
 }
 
+// ── My draft pick schedule (snake draft, pick 4 in a 12-team league) ──────
+const MY_PICKS = [4, 21, 28, 45, 52, 69, 76, 93, 100, 117, 124, 141, 148, 165, 172];
+
 // ── Best by Position ──────────────────────────────────────────────────────
 const POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'OF', 'SP', 'RP', 'DH'];
 
@@ -295,6 +298,34 @@ export default function Dashboard() {
             </span>
           </div>
         )}
+
+        {/* My pick schedule */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0, overflow: 'hidden', padding: '0 8px' }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--joyt-text-light)', textTransform: 'uppercase', letterSpacing: '.06em', flexShrink: 0 }}>My Picks</span>
+          <div style={{ display: 'flex', gap: 3, overflowX: 'auto' }}>
+            {MY_PICKS.map((pick, i) => {
+              const roundNum = i + 1;
+              const isCurrent = roundNum === round;
+              const isPast = roundNum < round;
+              return (
+                <div key={pick} style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  padding: '3px 7px', borderRadius: 6, flexShrink: 0,
+                  background: isCurrent ? 'var(--joyt-amber-light)' : isPast ? 'transparent' : 'var(--joyt-surface)',
+                  border: `1px solid ${isCurrent ? 'var(--joyt-amber)' : 'transparent'}`,
+                  opacity: isPast ? 0.4 : 1,
+                }}>
+                  <span style={{ fontSize: 8, fontWeight: 700, color: isCurrent ? 'var(--joyt-amber)' : 'var(--joyt-text-light)' }}>
+                    R{roundNum}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: isCurrent ? 'var(--joyt-amber)' : 'var(--joyt-text)' }}>
+                    {pick}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
