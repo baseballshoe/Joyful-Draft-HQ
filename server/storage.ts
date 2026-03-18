@@ -317,84 +317,102 @@ export class DatabaseStorage implements IStorage {
 
   async importRankings(data: ParsedImportData): Promise<{ updated: number; inserted: number; total: number }> {
     const { fp, espn, yahoo } = data;
-    const maxRank = fp.size || 300;
+
+    // Track which sources actually had data so we never null-out
+    // ranks for a source that wasn't uploaded in this batch.
+    const hasFP    = fp.size > 0;
+    const hasESPN  = espn.size > 0;
+    const hasYahoo = yahoo.size > 0;
+
+    const maxRank = fp.size || espn.size || 300;
 
     // Load all existing players
-    const existing = await db.select().from(players);
+    const existingRows = await db.select().from(players);
     const byName = new Map<string, Player>();
-    for (const p of existing) {
+    for (const p of existingRows) {
       byName.set(normalizeName(p.name), p);
     }
+
+    console.log(`[Import] DB has ${existingRows.length} players. Sources: FP=${fp.size} ESPN=${espn.size} Yahoo=${yahoo.size}`);
 
     let updated = 0;
     let inserted = 0;
 
     // Process every player from the FP list (master source)
     for (const [key, fpPlayer] of fp.entries()) {
-      const espnPlayer = espn.get(key);
+      const espnPlayer  = espn.get(key);
       const yahooPlayer = yahoo.get(key);
+      const existing    = byName.get(key);
 
-      const fpRank = fpPlayer.rank;
-      const espnRank = espnPlayer?.rank ?? null;
-      const yahooRank = yahooPlayer?.rank ?? null;
-      const consensus = calcConsensus(fpRank, espnRank, yahooRank, maxRank);
+      const newFpRank    = fpPlayer.rank;
+      // Only overwrite ESPN/Yahoo if that source was actually uploaded;
+      // otherwise keep whatever is already in the DB for that player.
+      const newEspnRank  = hasESPN  ? (espnPlayer?.rank ?? null)  : (existing?.espnRank  ?? null);
+      const newYahooRank = hasYahoo ? (yahooPlayer?.rank ?? null) : (existing?.yahooRank ?? null);
+      const consensus    = calcConsensus(newFpRank, newEspnRank, newYahooRank, maxRank);
 
-      const existing = byName.get(key);
       if (existing) {
         await db.update(players)
           .set({
-            fpRank,
-            espnRank,
-            yahooRank,
+            fpRank:       newFpRank,
+            espnRank:     newEspnRank,
+            yahooRank:    newYahooRank,
             consensusRank: consensus,
-            team: fpPlayer.team || existing.team,
-            posDisplay: fpPlayer.posDisplay !== "UTIL" ? fpPlayer.posDisplay : existing.posDisplay,
-            updatedAt: new Date(),
+            team:         fpPlayer.team || existing.team,
+            posDisplay:   fpPlayer.posDisplay !== "UTIL" ? fpPlayer.posDisplay : existing.posDisplay,
+            updatedAt:    new Date(),
           })
           .where(eq(players.id, existing.id));
         updated++;
       } else {
         await db.insert(players).values({
-          name: fpPlayer.name,
-          team: fpPlayer.team || espnPlayer?.team || yahooPlayer?.team || "",
-          positions: fpPlayer.posDisplay,
-          posDisplay: fpPlayer.posDisplay,
-          fpRank,
-          espnRank,
-          yahooRank,
+          name:          fpPlayer.name,
+          team:          fpPlayer.team || espnPlayer?.team || yahooPlayer?.team || "",
+          positions:     fpPlayer.posDisplay,
+          posDisplay:    fpPlayer.posDisplay,
+          fpRank:        newFpRank,
+          espnRank:      newEspnRank,
+          yahooRank:     newYahooRank,
           consensusRank: consensus,
-          status: "available",
+          status:        "available",
         });
         inserted++;
       }
     }
 
-    // Also update ESPN-only and Yahoo-only players that exist in our DB
-    for (const [key, espnPlayer] of espn.entries()) {
-      if (fp.has(key)) continue; // already handled above
-      const existing = byName.get(key);
-      if (existing) {
-        const yahooPlayer = yahoo.get(key);
-        const consensus = calcConsensus(existing.fpRank, espnPlayer.rank, yahooPlayer?.rank ?? existing.yahooRank, maxRank);
-        await db.update(players)
-          .set({ espnRank: espnPlayer.rank, yahooRank: yahooPlayer?.rank ?? existing.yahooRank, consensusRank: consensus, updatedAt: new Date() })
-          .where(eq(players.id, existing.id));
-        updated++;
+    // Also update ESPN-only players that exist in our DB
+    if (hasESPN) {
+      for (const [key, espnPlayer] of espn.entries()) {
+        if (fp.has(key)) continue; // already handled above
+        const existing = byName.get(key);
+        if (existing) {
+          const yahooPlayer  = yahoo.get(key);
+          const newYahooRank = hasYahoo ? (yahooPlayer?.rank ?? null) : existing.yahooRank;
+          const consensus    = calcConsensus(existing.fpRank, espnPlayer.rank, newYahooRank, maxRank);
+          await db.update(players)
+            .set({ espnRank: espnPlayer.rank, yahooRank: newYahooRank, consensusRank: consensus, updatedAt: new Date() })
+            .where(eq(players.id, existing.id));
+          updated++;
+        }
       }
     }
 
-    for (const [key, yahooPlayer] of yahoo.entries()) {
-      if (fp.has(key) || espn.has(key)) continue; // already handled above
-      const existing = byName.get(key);
-      if (existing) {
-        const consensus = calcConsensus(existing.fpRank, existing.espnRank, yahooPlayer.rank, maxRank);
-        await db.update(players)
-          .set({ yahooRank: yahooPlayer.rank, consensusRank: consensus, updatedAt: new Date() })
-          .where(eq(players.id, existing.id));
-        updated++;
+    // Also update Yahoo-only players that exist in our DB
+    if (hasYahoo) {
+      for (const [key, yahooPlayer] of yahoo.entries()) {
+        if (fp.has(key) || espn.has(key)) continue; // already handled above
+        const existing = byName.get(key);
+        if (existing) {
+          const consensus = calcConsensus(existing.fpRank, existing.espnRank, yahooPlayer.rank, maxRank);
+          await db.update(players)
+            .set({ yahooRank: yahooPlayer.rank, consensusRank: consensus, updatedAt: new Date() })
+            .where(eq(players.id, existing.id));
+          updated++;
+        }
       }
     }
 
+    console.log(`[Import] done — updated: ${updated}, inserted: ${inserted}`);
     await this.uniquifyConsensusRanks();
     return { updated, inserted, total: updated + inserted };
   }

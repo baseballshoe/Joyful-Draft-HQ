@@ -46,34 +46,70 @@ export interface ParsedImportData {
   yahoo: Map<string, ParsedRankSource>;
 }
 
+// ── Robust CSV line splitter (handles quoted commas) ─────────────────────────
+function splitCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let cur = "";
+  let inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') { inQuote = !inQuote; continue; }
+    if (ch === "," && !inQuote) { result.push(cur.trim()); cur = ""; continue; }
+    cur += ch;
+  }
+  result.push(cur.trim());
+  return result;
+}
+
 // ── FantasyPros CSV ──────────────────────────────────────────────────────────
 export function parseFPBuffer(buffer: Buffer): Map<string, ParsedRankSource> {
   const text = buffer.toString("utf8");
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) return new Map();
+  const rawLines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (rawLines.length < 2) return new Map();
 
-  const header = lines[0].split(",").map((h) => h.trim().replace(/"/g, "").toLowerCase());
-  const rkIdx   = header.findIndex((h) => /^rk$|^rank$/.test(h));
-  const nameIdx = header.findIndex((h) => /player.*name|^name$/.test(h));
-  const teamIdx = header.findIndex((h) => /^team$/.test(h));
-  const posIdx  = header.findIndex((h) => /^pos$|^position$/.test(h));
+  // Find the actual header row — skip any leading metadata rows that don't
+  // contain a recognizable name column.
+  let headerIdx = 0;
+  let header: string[] = [];
+  for (let i = 0; i < Math.min(rawLines.length, 5); i++) {
+    const cols = splitCsvLine(rawLines[i]).map((h) => h.toLowerCase());
+    const hasName = cols.some((h) => /player.*name|^name$|^player$/.test(h));
+    if (hasName) { header = cols; headerIdx = i; break; }
+  }
+  if (header.length === 0) {
+    console.warn("[FP import] could not locate header row — columns:", splitCsvLine(rawLines[0]).slice(0, 6));
+    return new Map();
+  }
 
-  if (nameIdx === -1) return new Map();
+  const rkIdx   = header.findIndex((h) => /^rk$|^rank$|^overall$|^overall rank$|^#$/.test(h));
+  const nameIdx = header.findIndex((h) => /player.*name|^name$|^player$/.test(h));
+  const teamIdx = header.findIndex((h) => /^team$|^tm$/.test(h));
+  const posIdx  = header.findIndex((h) => /^pos$|^position$|^eligible pos/.test(h));
+
+  console.log(`[FP import] header row ${headerIdx}:`, header.slice(0, 8));
+  console.log(`[FP import] col indices — rk:${rkIdx} name:${nameIdx} team:${teamIdx} pos:${posIdx}`);
+
+  if (nameIdx === -1) {
+    console.warn("[FP import] name column not found");
+    return new Map();
+  }
 
   const map = new Map<string, ParsedRankSource>();
-  for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(",").map((c) => c.trim().replace(/"/g, ""));
+  for (let i = headerIdx + 1; i < rawLines.length; i++) {
+    const cols = splitCsvLine(rawLines[i]);
     const rawName = cols[nameIdx];
     if (!rawName) continue;
-    const rank = rkIdx !== -1 ? parseInt(cols[rkIdx]) : null;
+    // Use row position as fallback rank when rank column is missing
+    const rawRank = rkIdx !== -1 ? parseInt(cols[rkIdx]) : i - headerIdx;
     const pos = posIdx !== -1 ? cols[posIdx] : "";
     map.set(normalizeName(rawName), {
       name: rawName.trim(),
-      rank: rank && !isNaN(rank) ? rank : null,
+      rank: !isNaN(rawRank) ? rawRank : i - headerIdx,
       team: teamIdx !== -1 ? cols[teamIdx] : "",
       posDisplay: normalizePos(pos),
     });
   }
+  console.log(`[FP import] parsed ${map.size} players`);
   return map;
 }
 
