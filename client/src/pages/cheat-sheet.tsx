@@ -48,10 +48,11 @@ export default function CheatSheet() {
       <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, padding: 10, overflow: 'hidden' }}>
         {sections.map(({ key, title, accent, placeholder }) => (
           <Card key={key} accent={accent} title={title}
-            style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}
+            bodyStyle={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
             <textarea
               className="notes-area"
-              style={{ flex: 1, margin: 10, height: 'calc(100% - 20px)', resize: 'none' }}
+              style={{ flex: 1, margin: 10, resize: 'none', minHeight: 0, width: 'calc(100% - 20px)', overflowY: 'auto' }}
               placeholder={placeholder}
               value={content[key as keyof CheatSheetContent]}
               onChange={(e) => save(key, e.target.value)}
