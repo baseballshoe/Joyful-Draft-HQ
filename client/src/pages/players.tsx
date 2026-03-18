@@ -324,6 +324,35 @@ export default function Players() {
                       <div style={{ color: 'var(--joyt-text-mid)', marginBottom: 6 }}>
                         File columns: {e.fileColumns.join(' | ')}
                       </div>
+
+                      {/* RAW rows — shows exactly what ESPN put in every column */}
+                      {e.rawRows && e.rawRows.length > 0 && (
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontWeight: 700, marginBottom: 4, color: '#888' }}>RAW rows from file (first 20) — every column as-is:</div>
+                          <div style={{ overflowX: 'auto' }}>
+                            <table style={{ borderCollapse: 'collapse', fontSize: 10, whiteSpace: 'nowrap' }}>
+                              <thead>
+                                <tr style={{ background: '#f5f5f5' }}>
+                                  {Object.keys(e.rawRows[0]).map((col: string) => (
+                                    <th key={col} style={{ padding: '2px 8px', border: '1px solid #ddd', textAlign: 'left' }}>{col}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {e.rawRows.map((row: any, i: number) => (
+                                  <tr key={i} style={{ background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                                    {Object.values(row).map((val: any, j: number) => (
+                                      <td key={j} style={{ padding: '1px 8px', border: '1px solid #eee', color: '#333' }}>{String(val ?? '')}</td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ fontWeight: 700, marginBottom: 4, color: '#888' }}>Top 30 after parsing:</div>
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                           <tr style={{ borderBottom: '1px solid var(--joyt-border)', textAlign: 'left' }}>

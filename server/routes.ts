@@ -244,6 +244,12 @@ export async function registerRoutes(
       const result: Record<string, any> = {};
 
       if (espnBuffer) {
+        // Also grab raw rows directly so we can see exactly what the file contains
+        const XLSX2 = await import("xlsx");
+        const wb2 = XLSX2.read(espnBuffer, { type: "buffer", raw: false });
+        const ws2 = wb2.Sheets[wb2.SheetNames[0]];
+        const rawRows = XLSX2.utils.sheet_to_json<Record<string, any>>(ws2, { defval: null }).slice(0, 20);
+
         const espnResult = parseESPNBuffer(espnBuffer);
         const rows = [...espnResult.map.entries()].map(([key, v]) => ({
           normalizedKey: key, name: v.name, rank: v.rank, team: v.team, pos: v.posDisplay,
@@ -257,6 +263,7 @@ export async function registerRoutes(
           fileColumns: espnResult.fileColumns,
           totalParsed: espnResult.map.size,
           top30: rows,
+          rawRows,   // first 20 raw rows straight from XLSX — shows exactly what ESPN sent
         };
       }
 
