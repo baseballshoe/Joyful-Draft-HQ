@@ -4,7 +4,7 @@ import { api } from '@/lib/api';
 const ALL_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'OF', 'SP', 'RP', 'DH', 'P', 'BN', 'Util'];
 const TIERS = [
   'ELITE TIER', 'TIER 1', 'TIER 1-2', 'TIER 2', 'TIER 2-3', 'TIER 3',
-  'TIER 3-4', 'TIER 4', 'SLEEPER RD', 'DEPTH', 'LOTTERY PICKS',
+  'TIER 3-4', 'TIER 4', 'SLEEPER RD', 'CLOSER', 'DEPTH', 'LOTTERY PICKS',
 ];
 const TIER_COLORS: Record<string, { color: string; bg: string }> = {
   'ELITE TIER':    { color: 'var(--joyt-orange)', bg: 'var(--joyt-orange-light)' },
@@ -16,6 +16,7 @@ const TIER_COLORS: Record<string, { color: string; bg: string }> = {
   'TIER 3-4':      { color: 'var(--joyt-text-mid)', bg: 'var(--joyt-surface)'    },
   'TIER 4':        { color: 'var(--joyt-text-light)', bg: 'var(--joyt-surface)'  },
   'SLEEPER RD':    { color: 'var(--joyt-purple)', bg: 'var(--joyt-purple-light)' },
+  'CLOSER':        { color: 'var(--joyt-teal)',   bg: 'var(--joyt-teal-light)'   },
   'DEPTH':         { color: 'var(--joyt-text-light)', bg: 'var(--joyt-surface)'  },
   'LOTTERY PICKS': { color: 'var(--joyt-pink)',   bg: 'var(--joyt-pink-light)'   },
 };
