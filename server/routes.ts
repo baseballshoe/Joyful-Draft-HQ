@@ -5,7 +5,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { WebSocketServer, WebSocket } from "ws";
 import multer from "multer";
-import { parseFPBuffer, parseESPNBuffer, parseYahooBuffer } from "./import-service";
+import { parseFPBuffer, parseESPNBuffer, parseYahooBuffer, type ESPNParseResult } from "./import-service";
 
 // Seed function to populate some initial players if empty
 async function seedDatabase() {
@@ -246,9 +246,10 @@ export async function registerRoutes(
         return res.status(400).json({ message: "No files uploaded. Provide at least one ranking file." });
       }
 
-      const fp    = fpBuffer    ? parseFPBuffer(fpBuffer)       : new Map();
-      const espn  = espnBuffer  ? parseESPNBuffer(espnBuffer)   : new Map();
-      const yahoo = yahooBuffer ? parseYahooBuffer(yahooBuffer) : new Map();
+      const fp         = fpBuffer    ? parseFPBuffer(fpBuffer)       : new Map();
+      const espnResult = espnBuffer  ? parseESPNBuffer(espnBuffer)   : null;
+      const espn       = espnResult  ? espnResult.map                : new Map();
+      const yahoo      = yahooBuffer ? parseYahooBuffer(yahooBuffer) : new Map();
 
       console.log(`[Import] parsed rows — FP: ${fp.size}, ESPN: ${espn.size}, Yahoo: ${yahoo.size}`);
 
@@ -258,6 +259,7 @@ export async function registerRoutes(
       res.json({
         ok: true, ...result,
         parsed: { fp: fp.size, espn: espn.size, yahoo: yahoo.size },
+        espnRankCol: espnResult ? (espnResult.rankColExists ? espnResult.rankCol : `ROW_INDEX (no "${espnResult.rankCol}" col — file cols: ${espnResult.fileColumns.slice(0,8).join(', ')})`) : null,
       });
     } catch (err: any) {
       console.error("Import error:", err);

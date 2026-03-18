@@ -132,14 +132,21 @@ export function parseFPBuffer(buffer: Buffer): Map<string, ParsedRankSource> {
 // ── ESPN XLSX / CSV ───────────────────────────────────────────────────────────
 // Uses the same flexible key-detection approach as the Yahoo parser so it
 // works regardless of which exact column names ESPN uses in a given export.
-export function parseESPNBuffer(buffer: Buffer): Map<string, ParsedRankSource> {
+export interface ESPNParseResult {
+  map: Map<string, ParsedRankSource>;
+  rankCol: string;
+  rankColExists: boolean;
+  fileColumns: string[];
+}
+
+export function parseESPNBuffer(buffer: Buffer): ESPNParseResult {
   const wb = XLSX.read(buffer, { type: "buffer", raw: false });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: null });
 
   if (rows.length === 0) {
     console.warn("[ESPN import] file parsed to 0 rows");
-    return new Map();
+    return { map: new Map(), rankCol: "—", rankColExists: false, fileColumns: [] };
   }
 
   const keys = Object.keys(rows[0]);
@@ -153,33 +160,50 @@ export function parseESPNBuffer(buffer: Buffer): Map<string, ParsedRankSource> {
     return candidates[0]; // fallback — will produce null values, logged below
   };
 
-  const rankCol    = findKey("Rank", "RK", "Rk", "Overall Rank", "OVR", "#", "rank");
+  // NOTE: "#" is intentionally excluded — ESPN exports often use "#" as a sequential
+  // row counter (1, 2, 3…) rather than the player's actual overall rank. Using it
+  // as the rank column would assign rank=1 to whoever appears first in the file.
+  const rankCol    = findKey("Rank", "RK", "Rk", "Overall Rank", "OVR", "Proj Rk", "PRK",
+                              "Projected Rank", "PROJ RK", "Overall", "rank");
   const nameCol    = findKey("Name", "Player Name", "Player", "PLAYER", "player name", "name");
   const teamCol    = findKey("Team", "TEAM", "Team Abbrev", "Tm", "team");
   const posCol     = findKey("Position", "POS", "Pos", "Eligible Positions", "position", "pos");
   const auctionCol = findKey("Auction Value", "Value", "Auction $", "$ Value", "Auction", "auction value");
 
-  console.log("[ESPN import] detected columns →", { rankCol, nameCol, teamCol, posCol, auctionCol });
+  // Detect whether the chosen rank column actually exists in the file.
+  // If it doesn't (findKey fell back to a missing column), we fall back to
+  // row-index ordering (same strategy as the FP parser), which is correct when
+  // the ESPN file is already sorted by rank.
+  const rankColExists = keys.some(k => k.toLowerCase().trim() === rankCol.toLowerCase().trim());
+
+  if (!rankColExists) {
+    console.warn(`[ESPN import] rank column "${rankCol}" not found in file — falling back to row-index ordering. File columns: ${keys.join(", ")}`);
+  }
+  console.log("[ESPN import] detected columns →", { rankCol, rankColExists, nameCol, teamCol, posCol, auctionCol });
   console.log("[ESPN import] sample row →", rows[0]);
 
   const map = new Map<string, ParsedRankSource>();
+  let rowIdx = 0;
   for (const row of rows) {
+    rowIdx++;
     const rawName = row[nameCol];
     if (!rawName) continue;
     const name    = rawName.toString().trim();
-    const rank    = parseInt(row[rankCol]);
+    const parsedRank = parseInt(row[rankCol]);
+    // If the rank column doesn't exist or its value isn't numeric, fall back to row position.
+    const rank = rankColExists && !isNaN(parsedRank) ? parsedRank : (rankColExists ? null : rowIdx);
     const pos     = (row[posCol]  ?? "").toString().trim();
     const auction = parseFloat(row[auctionCol]);
     map.set(normalizeName(name), {
       name,
-      rank: !isNaN(rank) ? rank : null,
+      rank,
       team: (row[teamCol] ?? "").toString().trim(),
       posDisplay: normalizePos(pos),
       auctionValue: !isNaN(auction) ? auction : null,
     });
   }
   console.log(`[ESPN import] parsed ${map.size} players`);
-  return map;
+  return { map, rankCol, rankColExists, fileColumns: keys };
 }
 
 // ── Yahoo XLSX / CSV ──────────────────────────────────────────────────────────

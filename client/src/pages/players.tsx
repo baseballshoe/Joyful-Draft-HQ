@@ -45,7 +45,8 @@ export default function Players() {
       if (json.parsed?.espn)  parts.push(`ESPN: ${json.parsed.espn}`);
       if (json.parsed?.yahoo) parts.push(`Yahoo: ${json.parsed.yahoo}`);
       const parsedInfo = parts.length ? ` (${parts.join(', ')} parsed)` : '';
-      setImportMsg({ text: `✓ Import complete — ${json.updated} updated, ${json.inserted} new.${parsedInfo}`, ok: true });
+      const espnColInfo = json.espnRankCol ? ` · ESPN rank col: "${json.espnRankCol}"` : '';
+      setImportMsg({ text: `✓ Import complete — ${json.updated} updated, ${json.inserted} new.${parsedInfo}${espnColInfo}`, ok: true });
       setFpFile(null); setEspnFile(null); setYahooFile(null);
       if (fpRef.current)    fpRef.current.value    = '';
       if (espnRef.current)  espnRef.current.value  = '';
@@ -298,7 +299,13 @@ export default function Players() {
                 <tr key={p.id} className={`status-${p.status}`} data-testid={`row-player-${p.id}`}>
                   <td>
                     <span className={`rank-num ${p.myRank ? 'custom' : 'consensus'}`}>
-                      #{Math.round(p.priorityRank)}
+                      #{p.myRank != null ? p.myRank : (() => {
+                        const fp = p.fpRank, espn = p.espnRank;
+                        if (fp != null && espn != null) return Math.round((fp + espn) / 2);
+                        if (fp != null) return fp;
+                        if (espn != null) return espn;
+                        return '—';
+                      })()}
                     </span>
                   </td>
                   <td style={{ color: 'var(--joyt-text-mid)', fontSize: 12 }}>
