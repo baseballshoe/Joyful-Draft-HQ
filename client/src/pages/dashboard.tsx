@@ -16,6 +16,30 @@ function StatChip({ label, value, color, bg }: { label: string; value: any; colo
   );
 }
 
+// ── Position filter bar ───────────────────────────────────────────────────
+const POS_OPTS = ['ALL', 'C', '1B', '2B', '3B', 'SS', 'OF', 'SP', 'RP', 'DH'];
+function PosFilterBar({ value, onChange, accent = 'var(--joyt-blue)' }: {
+  value: string; onChange: (p: string) => void; accent?: string;
+}) {
+  return (
+    <div style={{
+      display: 'flex', gap: 3, padding: '4px 10px 6px', flexWrap: 'wrap',
+      borderBottom: '1px solid var(--joyt-border)', flexShrink: 0,
+    }}>
+      {POS_OPTS.map((pos) => (
+        <button key={pos} onClick={() => onChange(pos)} style={{
+          fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
+          border: `1px solid ${value === pos ? accent : 'var(--joyt-border)'}`,
+          background: value === pos ? `color-mix(in srgb, ${accent} 15%, transparent)` : 'var(--joyt-surface)',
+          color: value === pos ? accent : 'var(--joyt-text-light)',
+        }}>
+          {pos}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Player row for target/sleeper lists ───────────────────────────────────
 function PlayerListRow({ player, rank, accentColor, onUpdate }: any) {
   return (
@@ -254,6 +278,11 @@ export default function Dashboard() {
   const { data: draftState } = useDraftState();
   const picksScrollRef = useRef<HTMLDivElement>(null);
 
+  // Position filters for the three list sections
+  const [targetPos,    setTargetPos]    = useState('ALL');
+  const [sleeperPos,   setSleeperPos]   = useState('ALL');
+  const [bestAvailPos, setBestAvailPos] = useState('ALL');
+
   const load = useCallback(async () => {
     const d = await api.getDashboard();
     setData(d);
@@ -376,27 +405,37 @@ export default function Dashboard() {
 
         {/* Col B: Top 10 Targets — spans both rows */}
         <Card accent="var(--joyt-pink)" title="Top 10 Targets"
-          style={{ gridColumn: 2, gridRow: '1 / 3', overflowY: 'auto' }}>
-          {(data.top10Targets ?? []).length === 0 && (
-            <div style={{ padding: 16, color: 'var(--joyt-text-light)', fontSize: 12 }}>
-              Tag players as "target" to see them here
-            </div>
-          )}
-          {(data.top10Targets ?? []).map((p: any, i: number) => (
-            <PlayerListRow key={p.id} player={p} rank={i + 1}
-              accentColor="var(--joyt-pink)" onUpdate={handlePlayerUpdate} />
-          ))}
+          style={{ gridColumn: 2, gridRow: '1 / 3', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <PosFilterBar value={targetPos} onChange={setTargetPos} accent="var(--joyt-pink)" />
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {(() => {
+              const list = (data.top10Targets ?? []).filter((p: any) => targetPos === 'ALL' || p.posDisplay === targetPos);
+              if (list.length === 0) return (
+                <div style={{ padding: 16, color: 'var(--joyt-text-light)', fontSize: 12 }}>
+                  {targetPos === 'ALL' ? 'Tag players as "target" to see them here' : `No ${targetPos} targets tagged`}
+                </div>
+              );
+              return list.map((p: any, i: number) => (
+                <PlayerListRow key={p.id} player={p} rank={i + 1}
+                  accentColor="var(--joyt-pink)" onUpdate={handlePlayerUpdate} />
+              ));
+            })()}
+          </div>
         </Card>
 
         {/* Col C Row 1: Current Rounds */}
         <Card accent="var(--joyt-blue)" title="Best Available — Current Rounds"
           style={{ gridColumn: 3, gridRow: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
           bodyStyle={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <PosFilterBar value={bestAvailPos} onChange={setBestAvailPos} accent="var(--joyt-blue)" />
           <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {roundNums.map((r) => {
-              const players = (data.roundData ?? {})[r] ?? [];
+              const allPlayers = (data.roundData ?? {})[r] ?? [];
+              const players = bestAvailPos === 'ALL' ? allPlayers : allPlayers.filter((p: any) => p.posDisplay === bestAvailPos);
               const pickStart = (r - 1) * 12 + 1;
               const pickEnd = r * 12;
+              if (players.length === 0) return null;
               return (
                 <div key={r}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, padding: '0 10px' }}>
@@ -406,10 +445,7 @@ export default function Dashboard() {
                     }}>ROUND {r}</span>
                     <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>picks {pickStart}-{pickEnd}</span>
                   </div>
-                  {players.length === 0
-                    ? <span style={{ fontSize: 11, color: 'var(--joyt-text-light)', padding: '0 10px' }}>No players available this round</span>
-                    : <RoundChipRow players={players} onUpdate={handlePlayerUpdate} />
-                  }
+                  <RoundChipRow players={players} onUpdate={handlePlayerUpdate} />
                 </div>
               );
             })}
@@ -430,41 +466,49 @@ export default function Dashboard() {
 
         {/* Col C Row 2: Sleepers + Top 5 */}
         <div style={{ gridColumn: 3, gridRow: 2, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <Card accent="var(--joyt-purple)" title="Sleepers (tagged)" style={{ overflowY: 'auto' }}>
-            {(data.sleepers ?? []).length === 0 && (
-              <div style={{ padding: 16, color: 'var(--joyt-text-light)', fontSize: 12 }}>
-                Tag players as "sleeper" to see them here
-              </div>
-            )}
-            {(data.sleepers ?? []).map((p: any, i: number) => (
-              <div key={p.id} style={{
-                display: 'flex', alignItems: 'flex-start', gap: 6,
-                padding: '7px 10px', borderBottom: '1px solid var(--joyt-border)',
-              }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--joyt-purple)', minWidth: 18 }}>{i + 1}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <PosBadge pos={p.posDisplay} style={{ fontSize: 9 }} />
-                    <span style={{ fontSize: 12, fontWeight: 700, overflow: 'hidden',
-                                   textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+          <Card accent="var(--joyt-purple)" title="Sleepers (tagged)"
+            style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <PosFilterBar value={sleeperPos} onChange={setSleeperPos} accent="var(--joyt-purple)" />
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {(() => {
+                const list = (data.sleepers ?? []).filter((p: any) => sleeperPos === 'ALL' || p.posDisplay === sleeperPos);
+                if (list.length === 0) return (
+                  <div style={{ padding: 16, color: 'var(--joyt-text-light)', fontSize: 12 }}>
+                    {sleeperPos === 'ALL' ? 'Tag players as "sleeper" to see them here' : `No ${sleeperPos} sleepers tagged`}
                   </div>
-                  <div style={{ display: 'flex', gap: 3, marginTop: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>
-                      Rd {Math.ceil((p.consensusRank ?? 1) / 12)}
-                    </span>
-                    {(p.tagsArray ?? []).map((t: string) => <TagPill key={t} tag={t} />)}
+                );
+                return list.map((p: any, i: number) => (
+                  <div key={p.id} style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 6,
+                    padding: '7px 10px', borderBottom: '1px solid var(--joyt-border)',
+                  }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--joyt-purple)', minWidth: 18 }}>{i + 1}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <PosBadge pos={p.posDisplay} style={{ fontSize: 9 }} />
+                        <span style={{ fontSize: 12, fontWeight: 700, overflow: 'hidden',
+                                       textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 3, marginTop: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span style={{ fontSize: 10, color: 'var(--joyt-text-light)' }}>
+                          Rd {Math.ceil((p.consensusRank ?? 1) / 12)}
+                        </span>
+                        {(p.tagsArray ?? []).map((t: string) => <TagPill key={t} tag={t} />)}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--joyt-amber)' }}>
+                        #{Math.round(p.priorityRank)}
+                      </div>
+                      <div style={{ marginTop: 4 }}>
+                        <ActionBtns player={p} onUpdate={handlePlayerUpdate} size="sm" />
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--joyt-amber)' }}>
-                    #{Math.round(p.priorityRank)}
-                  </div>
-                  <div style={{ marginTop: 4 }}>
-                    <ActionBtns player={p} onUpdate={handlePlayerUpdate} size="sm" />
-                  </div>
-                </div>
-              </div>
-            ))}
+                ));
+              })()}
+            </div>
           </Card>
 
           <Card accent="var(--joyt-amber)" title="Top 5 Available" style={{ overflowY: 'auto' }}>
