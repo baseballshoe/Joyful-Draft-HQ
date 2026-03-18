@@ -189,25 +189,70 @@ export function parseESPNBuffer(buffer: Buffer): ESPNParseResult {
     return candidates[0]; // fallback — will produce null values, logged below
   };
 
-  // NOTE: "#" is intentionally excluded — ESPN exports often use "#" as a sequential
-  // row counter (1, 2, 3…) rather than the player's actual overall rank. Using it
-  // as the rank column would assign rank=1 to whoever appears first in the file.
-  const rankCol    = findKey("Rank", "RK", "Rk", "Overall Rank", "OVR", "Proj Rk", "PRK",
-                              "Projected Rank", "PROJ RK", "Overall", "rank");
   const nameCol    = findKey("Name", "Player Name", "Player", "PLAYER", "player name", "name");
   const teamCol    = findKey("Team", "TEAM", "Team Abbrev", "Tm", "team");
   const posCol     = findKey("Position", "POS", "Pos", "Eligible Positions", "position", "pos");
   const auctionCol = findKey("Auction Value", "Value", "Auction $", "$ Value", "Auction", "auction value");
 
-  // Detect whether the chosen rank column actually exists in the file.
-  // If it doesn't (findKey fell back to a missing column), we fall back to
-  // row-index ordering (same strategy as the FP parser), which is correct when
-  // the ESPN file is already sorted by rank.
-  const rankColExists = keys.some(k => k.toLowerCase().trim() === rankCol.toLowerCase().trim());
+  /**
+   * Determine whether a candidate column contains OVERALL rank values.
+   * Position-rank columns have many duplicate small values (every position group
+   * has its own #1, #2, …) so they fail this check.
+   * Returns true if the column looks like a sequential 1-N overall rank.
+   */
+  function isOverallRankCol(colName: string): boolean {
+    if (!keys.some(k => k.toLowerCase().trim() === colName.toLowerCase().trim())) return false;
+    const sample = rows.slice(0, Math.min(rows.length, 60));
+    const vals = sample.map(r => parseInt(r[colName])).filter(v => !isNaN(v));
+    if (vals.length < 5) return false;
+    const uniqueVals = new Set(vals);
+    // A position-rank column will have many duplicates (e.g. many 1s, 2s, 3s).
+    // An overall rank column should be almost entirely unique values.
+    const uniqueRatio = uniqueVals.size / vals.length;
+    // Also check: overall rank col should have values spanning a reasonable range.
+    const maxVal = Math.max(...vals);
+    const looksSequential = uniqueRatio > 0.85 && maxVal > 20;
+    console.log(`[ESPN import] rank col candidate "${colName}": uniqueRatio=${uniqueRatio.toFixed(2)}, max=${maxVal}, looksSequential=${looksSequential}`);
+    return looksSequential;
+  }
+
+  // Try overall-rank-specific column names first (unambiguous), then fall through
+  // to ambiguous names like "Rank" only if they pass the duplicate-check.
+  // NOTE: "Rank" alone is often POSITION rank in ESPN exports (Cal Raleigh = C#1 = rank 1).
+  //       We test it with isOverallRankCol() and fall back to row-index if it fails.
+  const OVERALL_PRIORITY = ["Overall Rank", "OVR", "Overall", "PROJ RK", "Projected Rank", "PRK", "Proj Rk"];
+  const AMBIGUOUS        = ["Rank", "RK", "Rk", "rank"];
+
+  let rankCol      = "";
+  let rankColExists = false;
+
+  for (const candidate of OVERALL_PRIORITY) {
+    if (isOverallRankCol(candidate)) {
+      rankCol = findKey(candidate);
+      rankColExists = true;
+      console.log(`[ESPN import] using unambiguous overall-rank column: "${rankCol}"`);
+      break;
+    }
+  }
 
   if (!rankColExists) {
-    console.warn(`[ESPN import] rank column "${rankCol}" not found in file — falling back to row-index ordering. File columns: ${keys.join(", ")}`);
+    for (const candidate of AMBIGUOUS) {
+      if (isOverallRankCol(candidate)) {
+        rankCol = findKey(candidate);
+        rankColExists = true;
+        console.log(`[ESPN import] using ambiguous column "${rankCol}" — passed duplicate check`);
+        break;
+      }
+    }
   }
+
+  if (!rankColExists) {
+    // All named columns failed the overall-rank check (likely all are position ranks).
+    // Fall back to row-index ordering — ESPN files are sorted by overall rank.
+    rankCol = OVERALL_PRIORITY[0]; // for display purposes only
+    console.warn(`[ESPN import] no valid overall-rank column found — using row-index ordering. File columns: ${keys.join(", ")}`);
+  }
+
   console.log("[ESPN import] detected columns →", { rankCol, rankColExists, nameCol, teamCol, posCol, auctionCol });
   console.log("[ESPN import] sample row →", rows[0]);
 
