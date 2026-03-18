@@ -51,11 +51,12 @@ export function PlayersTable({ players, isLoading }: { players?: EnrichedPlayer[
         <table className="w-full text-left border-collapse tabular-nums text-[13px]">
           <thead className="sticky top-0 z-20 bg-card/95 backdrop-blur shadow-sm shadow-black/10">
             <tr className="border-b border-border/50 text-muted-foreground font-semibold font-sans uppercase tracking-wider text-[11px]">
-              <th className="py-3 px-4 w-12 text-center">Rk</th>
+              <th className="py-3 px-4 w-12 text-center" title="Consensus rank — sequential position ordered by (FP+ESPN)/2">Con</th>
               <th className="py-3 px-4">Player</th>
               <th className="py-3 px-4 w-16 text-center">Pos</th>
-              <th className="py-3 px-4 w-16 text-center">ESPN</th>
-              <th className="py-3 px-4 w-16 text-center">Yahoo</th>
+              <th className="py-3 px-4 w-14 text-center">FP</th>
+              <th className="py-3 px-4 w-14 text-center">ESPN</th>
+              <th className="py-3 px-4 w-14 text-center">Yahoo</th>
               <th className="py-3 px-4 w-24 text-center">My Rk</th>
               <th className="py-3 px-4 w-48">Tags</th>
               <th className="py-3 px-4 w-32 text-right">Status</th>
@@ -78,7 +79,13 @@ export function PlayersTable({ players, isLoading }: { players?: EnrichedPlayer[
                   )}
                 >
                   <td className="py-2 px-4 text-center font-mono text-muted-foreground">
-                    {p.consensusRank ? Math.round(p.consensusRank) : '-'}
+                    {(() => {
+                      const fp = p.fpRank, espn = p.espnRank;
+                      if (fp != null && espn != null) return Math.round((fp + espn) / 2);
+                      if (fp != null) return fp;
+                      if (espn != null) return espn;
+                      return '-';
+                    })()}
                   </td>
                   <td className="py-2 px-4">
                     <div className="flex flex-col">
@@ -93,6 +100,7 @@ export function PlayersTable({ players, isLoading }: { players?: EnrichedPlayer[
                       {p.posDisplay}
                     </span>
                   </td>
+                  <td className="py-2 px-4 text-center font-mono text-muted-foreground">{p.fpRank || '-'}</td>
                   <td className="py-2 px-4 text-center font-mono text-muted-foreground">{p.espnRank || '-'}</td>
                   <td className="py-2 px-4 text-center font-mono text-muted-foreground">{p.yahooRank || '-'}</td>
                   <td className="py-2 px-4 text-center">

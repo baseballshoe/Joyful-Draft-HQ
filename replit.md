@@ -7,7 +7,7 @@ JOYT is a real-time fantasy baseball draft assistant tool designed for 12-team H
 Key features:
 - Real-time multi-user sync via WebSockets
 - Player ranking aggregation from FantasyPros, ESPN, and Yahoo
-- Consensus rank calculation (FP 40%, ESPN 35%, Yahoo 25%)
+- Consensus rank calculation (FP 50%, ESPN 50% — Yahoo stored for reference only)
 - Player tagging (sleeper, target, watch, injured, skip)
 - Draft state tracking (current round/pick, rank mode)
 - Per-round strategy planning with tier labels
@@ -40,7 +40,7 @@ This eliminates duplication of types and ensures the API contract is enforced in
 - **Styling**: Light theme. Tailwind CSS v3 for utilities. JOYT design system CSS in `index.css` using custom properties (`--joyt-*`) with utility classes: `.joyt-card`, `.pos-badge`, `.tag-pill`, `.filter-pill`, `.btn`, `.data-table`, `.search-input`, `.notes-area`, `.progress-bar`, `.editable-cell`.
 - **API Client**: `client/src/lib/api.ts` — direct fetch wrappers for all API calls, used by pages that manage their own state.
 - **Real-time**: `useWebSocket` hook connects to `/ws`, listens for server broadcasts, returns `{ connected: boolean }`, and invalidates React Query caches. Called in layout component so nav can show live sync status.
-- **Layout**: Top horizontal navigation bar with: 💧 "JAZZ ON YOUR TATIS" logo, nav tabs (active tab = pink background), rank mode selector dropdown, live sync indicator dot.
+- **Layout**: Top horizontal navigation bar with: 💦 "JAZZ ON YOUR TATIS" logo, nav tabs (active tab = pink background), rank mode selector dropdown, live sync indicator dot.
 
 **Key design files:**
 - `client/src/components/layout.tsx` — top nav header
@@ -95,8 +95,8 @@ On first startup, if the `players` table is empty, the server seeds default play
 
 Priority rank is determined by:
 1. User's custom `myRank` if set
-2. Otherwise `consensusRank` (weighted average: FP 40%, ESPN 35%, Yahoo 25%)
-3. Missing source ranks are penalized (treated as `maxRank + 100`)
+2. Otherwise `consensusRank` — stored as a sequential position (uniquified) for internal sorting; displayed in the CON column as the raw `ROUND((fpRank + espnRank) / 2)` average so users can verify the math. Yahoo is ignored in the formula.
+3. If only one source has the player, that source's rank is used directly as the consensus.
 
 ### Build System
 

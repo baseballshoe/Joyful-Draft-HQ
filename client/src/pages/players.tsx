@@ -302,7 +302,13 @@ export default function Players() {
                     </span>
                   </td>
                   <td style={{ color: 'var(--joyt-text-mid)', fontSize: 12 }}>
-                    {p.consensusRank ? Math.round(p.consensusRank) : '—'}
+                    {(() => {
+                      const fp = p.fpRank, espn = p.espnRank;
+                      if (fp != null && espn != null) return Math.round((fp + espn) / 2);
+                      if (fp != null) return fp;
+                      if (espn != null) return espn;
+                      return '—';
+                    })()}
                   </td>
                   <td style={{ color: 'var(--joyt-text-mid)', fontSize: 12 }}>{p.fpRank ?? '—'}</td>
                   <td style={{ color: 'var(--joyt-text-mid)', fontSize: 12 }}>{p.espnRank ?? '—'}</td>
