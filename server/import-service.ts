@@ -219,13 +219,20 @@ export function parseESPNBuffer(buffer: Buffer): ESPNParseResult {
     }
     const pos     = (row[posCol]  ?? "").toString().trim();
     const auction = parseFloat(row[auctionCol]);
-    map.set(normalizeName(name), {
-      name,
-      rank,
-      team: (row[teamCol] ?? "").toString().trim(),
-      posDisplay: normalizePos(pos),
-      auctionValue: !isNaN(auction) ? auction : null,
-    });
+    const key = normalizeName(name);
+    // ESPN's file lists each player TWICE: first in the overall ranking section
+    // (with their true overall rank, e.g. Cal Raleigh = 29), and then again in
+    // a per-position section at the end (with position rank, e.g. C#1 = rank 1).
+    // Only keep the FIRST occurrence so the overall rank wins.
+    if (!map.has(key)) {
+      map.set(key, {
+        name,
+        rank,
+        team: (row[teamCol] ?? "").toString().trim(),
+        posDisplay: normalizePos(pos),
+        auctionValue: !isNaN(auction) ? auction : null,
+      });
+    }
   }
   console.log(`[ESPN import] parsed ${map.size} players`);
   return { map, rankCol, rankColExists: true, fileColumns: keys };
