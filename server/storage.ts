@@ -202,8 +202,7 @@ export class DatabaseStorage implements IStorage {
 
     const availAndTarget = await db.select().from(players)
       .where(and(eq(players.status, 'available'), sql`',' || ${players.tags} || ',' LIKE '%,target,%'`))
-      .orderBy(orderByMode)
-      .limit(10);
+      .orderBy(orderByMode);
     const top10Targets = availAndTarget.map(enrichPlayer);
 
     const availAndSleeper = await db.select().from(players)

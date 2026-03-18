@@ -207,25 +207,38 @@ const ROSTER_SLOTS = [
 ];
 
 function RosterSummary({ myRoster }: { myRoster: any[] }) {
-  const counts: Record<string, number> = {};
+  const bySlot: Record<string, any[]> = {};
   myRoster.forEach((p) => {
     const slot = p.rosterSlot ?? p.posDisplay;
-    counts[slot] = (counts[slot] ?? 0) + 1;
+    if (!bySlot[slot]) bySlot[slot] = [];
+    bySlot[slot].push(p);
   });
 
   return (
-    <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
       {ROSTER_SLOTS.map(({ pos, total }) => {
-        const filled = counts[pos] ?? 0;
+        const players = bySlot[pos] ?? [];
+        const filled = players.length;
         const pct = Math.min(filled / total, 1);
         const color = pct >= 1 ? 'var(--joyt-green)' : pct > 0 ? 'var(--joyt-amber)' : 'var(--joyt-border)';
         return (
-          <div key={pos} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--joyt-text)', minWidth: 28 }}>{pos}</span>
-            <div className="progress-bar" style={{ flex: 1 }}>
-              <div className="fill" style={{ width: `${pct * 100}%`, background: color }} />
+          <div key={pos}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: players.length > 0 ? 3 : 0 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--joyt-text)', minWidth: 28 }}>{pos}</span>
+              <div className="progress-bar" style={{ flex: 1 }}>
+                <div className="fill" style={{ width: `${pct * 100}%`, background: color }} />
+              </div>
+              <span style={{ fontSize: 10, fontWeight: 700, color, minWidth: 28 }}>{filled}/{total}</span>
             </div>
-            <span style={{ fontSize: 10, fontWeight: 700, color, minWidth: 28 }}>{filled}/{total}</span>
+            {players.map((p) => (
+              <div key={p.id} style={{
+                fontSize: 10, color: 'var(--joyt-text-mid)', fontWeight: 600,
+                paddingLeft: 36, marginBottom: 1,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {p.name}
+              </div>
+            ))}
           </div>
         );
       })}
@@ -398,13 +411,15 @@ export default function Dashboard() {
         gap: 8,
       }}>
 
-        {/* Col A Row 1: My Roster */}
-        <Card accent="var(--joyt-green)" title="My Roster" style={{ gridRow: 1, overflow: 'hidden' }}>
+        {/* Col A: My Roster — spans both rows, shows player names + progress bars */}
+        <Card accent="var(--joyt-green)" title="My Roster"
+          style={{ gridColumn: 1, gridRow: '1 / 3', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+          bodyStyle={{ flex: 1, overflowY: 'auto' }}>
           <RosterSummary myRoster={data.myRoster ?? []} />
         </Card>
 
-        {/* Col B: Top 10 Targets — spans both rows */}
-        <Card accent="var(--joyt-pink)" title="Top 10 Targets"
+        {/* Col B: My Targets — spans both rows, scrolls to show all tagged targets */}
+        <Card accent="var(--joyt-pink)" title="My Targets"
           style={{ gridColumn: 2, gridRow: '1 / 3', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
           bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <PosFilterBar value={targetPos} onChange={setTargetPos} accent="var(--joyt-pink)" />
@@ -452,15 +467,15 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        {/* Col D: Quick Mark — spans both rows */}
+        {/* Col D Row 1: Quick Mark */}
         <Card accent="var(--joyt-amber)" title="Quick Mark"
-          style={{ gridColumn: 4, gridRow: '1 / 3', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          style={{ gridColumn: 4, gridRow: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <QuickMark onUpdate={handlePlayerUpdate} />
         </Card>
 
-        {/* Col A Row 2: Best by Position */}
+        {/* Col D Row 2: Best by Position */}
         <Card accent="var(--joyt-teal)" title="Best by Position"
-          style={{ gridRow: 2, overflowY: 'auto' }}>
+          style={{ gridColumn: 4, gridRow: 2, overflowY: 'auto' }}>
           <BestByPos bestByPos={data.bestByPos ?? {}} onUpdate={handlePlayerUpdate} />
         </Card>
 
