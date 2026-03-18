@@ -189,16 +189,18 @@ export function parseESPNBuffer(buffer: Buffer): ESPNParseResult {
     return candidates[0]; // fallback — will produce null values, logged below
   };
 
-  // ESPN's "Rank" column is POSITION rank (Cal Raleigh = Catcher #1 = Rank 1),
-  // NOT overall rank. The file itself is already sorted by overall rank from
-  // top to bottom, so we always use the row's position index as the ESPN rank.
+  // The ESPN "Rank" column contains the OVERALL rank (e.g. Cal Raleigh = 29).
+  // Use it directly.
+  const rankCol    = findKey("Rank", "RK", "Rk", "Overall Rank", "OVR", "Projected Rank", "PRK", "Proj Rk", "rank");
   const nameCol    = findKey("Player", "Name", "Player Name", "PLAYER", "player name", "name");
   const teamCol    = findKey("Team", "TEAM", "Team Abbrev", "Tm", "team");
   const posCol     = findKey("Elig. Pos.", "Position", "POS", "Pos", "Eligible Positions", "position", "pos");
   const auctionCol = findKey("Auction Value", "Value", "Auction $", "$ Value", "Auction", "auction value");
-  const rankCol    = "row-index (file is pre-sorted by overall rank)";
 
-  console.log("[ESPN import] detected columns →", { rankCol, nameCol, teamCol, posCol, auctionCol });
+  const rankColExists = keys.some(k => k.toLowerCase().trim() === rankCol.toLowerCase().trim());
+
+  console.log("[ESPN import] file columns →", keys);
+  console.log("[ESPN import] detected columns →", { rankCol, rankColExists, nameCol, teamCol, posCol });
   console.log("[ESPN import] sample row →", rows[0]);
 
   const map = new Map<string, ParsedRankSource>();
@@ -208,8 +210,13 @@ export function parseESPNBuffer(buffer: Buffer): ESPNParseResult {
     const rawName = row[nameCol];
     if (!rawName) continue;
     const name    = rawName.toString().trim();
-    // Always use row position as overall rank — ESPN file is sorted by overall rank.
-    const rank = rowIdx;
+    const parsedRank = parseInt(row[rankCol]);
+    // Use the Rank column value; fall back to row index only if missing/unparseable.
+    const rank = !isNaN(parsedRank) ? parsedRank : rowIdx;
+    // Log first 30 rows so we can verify names & ranks in the server console.
+    if (rowIdx <= 30) {
+      console.log(`[ESPN row ${rowIdx}] raw="${name}" normalized="${normalizeName(name)}" rank=${rank}`);
+    }
     const pos     = (row[posCol]  ?? "").toString().trim();
     const auction = parseFloat(row[auctionCol]);
     map.set(normalizeName(name), {

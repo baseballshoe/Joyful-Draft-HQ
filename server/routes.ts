@@ -245,11 +245,12 @@ export async function registerRoutes(
 
       if (espnBuffer) {
         const espnResult = parseESPNBuffer(espnBuffer);
-        const rows = [...espnResult.map.entries()].slice(0, 30).map(([key, v]) => ({
+        const rows = [...espnResult.map.entries()].map(([key, v]) => ({
           normalizedKey: key, name: v.name, rank: v.rank, team: v.team, pos: v.posDisplay,
         }));
-        // Sort by rank asc so top-ranked are first
+        // Sort by rank asc so top-ranked are first, THEN slice top 30
         rows.sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
+        rows.splice(30);
         result.espn = {
           rankCol: espnResult.rankCol,
           rankColExists: espnResult.rankColExists,
