@@ -55,7 +55,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       }}>
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 24, flexShrink: 0 }}>
-          <span style={{ fontSize: 28, lineHeight: 1 }}>💧</span>
+          <span style={{ fontSize: 28, lineHeight: 1 }}>💦</span>
           <span style={{
             fontStyle: 'italic', fontWeight: 700, fontSize: 15,
             color: 'var(--joyt-pink)', letterSpacing: '.02em',
