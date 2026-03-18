@@ -229,6 +229,56 @@ export async function registerRoutes(
     }
   });
 
+  // Preview Import (diagnose without saving)
+  app.post("/api/import/preview", upload.fields([
+    { name: "fpFile", maxCount: 1 },
+    { name: "espnFile", maxCount: 1 },
+    { name: "yahooFile", maxCount: 1 },
+  ]), async (req, res) => {
+    try {
+      const files = req.files as Record<string, Express.Multer.File[]>;
+      const espnBuffer  = files?.espnFile?.[0]?.buffer;
+      const fpBuffer    = files?.fpFile?.[0]?.buffer;
+      const yahooBuffer = files?.yahooFile?.[0]?.buffer;
+
+      const result: Record<string, any> = {};
+
+      if (espnBuffer) {
+        const espnResult = parseESPNBuffer(espnBuffer);
+        const rows = [...espnResult.map.entries()].slice(0, 30).map(([key, v]) => ({
+          normalizedKey: key, name: v.name, rank: v.rank, team: v.team, pos: v.posDisplay,
+        }));
+        // Sort by rank asc so top-ranked are first
+        rows.sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
+        result.espn = {
+          rankCol: espnResult.rankCol,
+          rankColExists: espnResult.rankColExists,
+          fileColumns: espnResult.fileColumns,
+          totalParsed: espnResult.map.size,
+          top30: rows,
+        };
+      }
+
+      if (fpBuffer) {
+        const fpMap = parseFPBuffer(fpBuffer);
+        const rows = [...fpMap.entries()].slice(0, 20).map(([key, v]) => ({
+          normalizedKey: key, name: v.name, rank: v.rank, team: v.team,
+        }));
+        result.fp = { totalParsed: fpMap.size, top20: rows };
+      }
+
+      if (yahooBuffer) {
+        const yahooMap = parseYahooBuffer(yahooBuffer);
+        result.yahoo = { totalParsed: yahooMap.size };
+      }
+
+      res.json(result);
+    } catch (err: any) {
+      console.error("Preview error:", err);
+      res.status(500).json({ message: err?.message ?? "Preview failed" });
+    }
+  });
+
   // Import Rankings
   app.post("/api/import", upload.fields([
     { name: "fpFile", maxCount: 1 },

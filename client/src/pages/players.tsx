@@ -20,6 +20,8 @@ export default function Players() {
   const [yahooFile, setYahooFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagResult, setDiagResult] = useState<any>(null);
 
   const fpRef    = useRef<HTMLInputElement>(null);
   const espnRef  = useRef<HTMLInputElement>(null);
@@ -59,6 +61,29 @@ export default function Players() {
       setImportMsg({ text: err.message || 'Import failed.', ok: false });
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function handleDiagnose() {
+    if (!fpFile && !espnFile && !yahooFile) {
+      setDiagResult({ error: 'Attach at least one file first.' });
+      return;
+    }
+    setDiagnosing(true);
+    setDiagResult(null);
+    try {
+      const form = new FormData();
+      if (fpFile)    form.append('fpFile',    fpFile);
+      if (espnFile)  form.append('espnFile',  espnFile);
+      if (yahooFile) form.append('yahooFile', yahooFile);
+      const res = await fetch('/api/import/preview', { method: 'POST', body: form });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || 'Preview failed');
+      setDiagResult(json);
+    } catch (err: any) {
+      setDiagResult({ error: err.message || 'Preview failed' });
+    } finally {
+      setDiagnosing(false);
     }
   }
 
@@ -245,7 +270,7 @@ export default function Players() {
               </label>
             </div>
 
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 className="btn"
                 onClick={handleImport}
@@ -256,7 +281,16 @@ export default function Players() {
               </button>
               <button
                 className="btn"
-                onClick={() => { setShowImport(false); setImportMsg(null); setFpFile(null); setEspnFile(null); setYahooFile(null); }}
+                onClick={handleDiagnose}
+                disabled={diagnosing}
+                style={{ background: 'var(--joyt-blue)', color: '#fff', opacity: diagnosing ? 0.6 : 1 }}
+                title="Preview what ranks would be parsed — does NOT save anything"
+                data-testid="button-diagnose-import">
+                {diagnosing ? 'Checking…' : '🔍 Diagnose (no save)'}
+              </button>
+              <button
+                className="btn"
+                onClick={() => { setShowImport(false); setImportMsg(null); setDiagResult(null); setFpFile(null); setEspnFile(null); setYahooFile(null); }}
                 style={{ background: 'var(--joyt-bg)', color: 'var(--joyt-text-mid)' }}>
                 Cancel
               </button>
@@ -269,6 +303,69 @@ export default function Players() {
                 </span>
               )}
             </div>
+
+            {/* Diagnose result panel */}
+            {diagResult && (
+              <div style={{
+                background: '#fff', border: '1px solid var(--joyt-border)', borderRadius: 6,
+                padding: '10px 12px', fontSize: 11, fontFamily: 'monospace',
+                maxHeight: 360, overflowY: 'auto',
+              }}>
+                {diagResult.error && <div style={{ color: 'var(--joyt-red)' }}>{diagResult.error}</div>}
+
+                {diagResult.espn && (() => {
+                  const e = diagResult.espn;
+                  return (
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#EF5350', marginBottom: 6 }}>
+                        ESPN: {e.totalParsed} players parsed · rank col detected: <code>"{e.rankCol}"</code>
+                        {!e.rankColExists && <span style={{ color: 'var(--joyt-red)' }}> ⚠ NOT FOUND → using row index</span>}
+                      </div>
+                      <div style={{ color: 'var(--joyt-text-mid)', marginBottom: 6 }}>
+                        File columns: {e.fileColumns.join(' | ')}
+                      </div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--joyt-border)', textAlign: 'left' }}>
+                            <th style={{ padding: '2px 8px 2px 0' }}>Rank</th>
+                            <th style={{ padding: '2px 8px 2px 0' }}>Name</th>
+                            <th style={{ padding: '2px 8px 2px 0' }}>Team</th>
+                            <th style={{ padding: '2px 0' }}>Pos</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {e.top30.map((r: any, i: number) => (
+                            <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                              <td style={{ padding: '1px 8px 1px 0', color: 'var(--joyt-pink)', fontWeight: 700 }}>{r.rank ?? '—'}</td>
+                              <td style={{ padding: '1px 8px 1px 0' }}>{r.name}</td>
+                              <td style={{ padding: '1px 8px 1px 0', color: 'var(--joyt-text-mid)' }}>{r.team}</td>
+                              <td style={{ padding: '1px 0', color: 'var(--joyt-text-mid)' }}>{r.pos}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+
+                {diagResult.fp && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontWeight: 700, color: '#4FC3F7' }}>FP: {diagResult.fp.totalParsed} players parsed</div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <tbody>
+                        {diagResult.fp.top20.map((r: any, i: number) => (
+                          <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                            <td style={{ padding: '1px 8px 1px 0', color: 'var(--joyt-pink)', fontWeight: 700 }}>{r.rank}</td>
+                            <td style={{ padding: '1px 8px 1px 0' }}>{r.name}</td>
+                            <td style={{ padding: '1px 0', color: 'var(--joyt-text-mid)' }}>{r.team}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
