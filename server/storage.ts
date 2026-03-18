@@ -86,7 +86,7 @@ export interface IStorage {
   updateCheatSheet(section: string, content: string): Promise<void>;
 
   // Import Rankings
-  importRankings(data: ParsedImportData): Promise<{ updated: number; inserted: number; total: number }>;
+  importRankings(data: ParsedImportData): Promise<{ updated: number; inserted: number; total: number; unmatched: { espn: string[], fp: string[] } }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -315,7 +315,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async importRankings(data: ParsedImportData): Promise<{ updated: number; inserted: number; total: number }> {
+  async importRankings(data: ParsedImportData): Promise<{ updated: number; inserted: number; total: number; unmatched: { espn: string[], fp: string[] } }> {
     const { fp, espn, yahoo } = data;
 
     // Track which sources actually had data so we never null-out
@@ -337,12 +337,15 @@ export class DatabaseStorage implements IStorage {
 
     let updated = 0;
     let inserted = 0;
+    const unmatchedEspn: string[] = [];
+    const unmatchedFp: string[] = [];
 
     // Process every player from the FP list (master source)
     for (const [key, fpPlayer] of fp.entries()) {
       const espnPlayer  = espn.get(key);
       const yahooPlayer = yahoo.get(key);
       const existing    = byName.get(key);
+      if (!existing) unmatchedFp.push(fpPlayer.name);
 
       const newFpRank    = fpPlayer.rank;
       // Only overwrite ESPN/Yahoo if that source was actually uploaded;
@@ -393,6 +396,8 @@ export class DatabaseStorage implements IStorage {
             .set({ espnRank: espnPlayer.rank, yahooRank: newYahooRank, consensusRank: consensus, updatedAt: new Date() })
             .where(eq(players.id, existing.id));
           updated++;
+        } else {
+          unmatchedEspn.push(espnPlayer.name);
         }
       }
     }
@@ -412,9 +417,15 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    if (unmatchedEspn.length > 0) {
+      console.warn(`[Import] ${unmatchedEspn.length} ESPN player(s) not found in DB (name mismatch):`, unmatchedEspn);
+    }
+    if (unmatchedFp.length > 0) {
+      console.warn(`[Import] ${unmatchedFp.length} FP player(s) not found in DB (new players — will be inserted):`, unmatchedFp.slice(0, 10));
+    }
     console.log(`[Import] done — updated: ${updated}, inserted: ${inserted}`);
     await this.uniquifyConsensusRanks();
-    return { updated, inserted, total: updated + inserted };
+    return { updated, inserted, total: updated + inserted, unmatched: { espn: unmatchedEspn, fp: [] } };
   }
 
   async recalculateConsensusRanks(): Promise<void> {

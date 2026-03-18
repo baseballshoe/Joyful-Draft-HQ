@@ -37,18 +37,47 @@ function normalizePos(raw: string | null | undefined): string {
  * Steps:
  *  1. Strip parentheticals: "Aaron Judge (DTD)"  → "Aaron Judge"
  *  2. Lowercase + trim
- *  3. Remove all non-alphanumeric / non-space characters (accents, dots, etc.)
- *  4. Collapse whitespace
+ *  3. NFD Unicode decomposition → strip combining diacritics (é→e, á→a, etc.)
+ *  4. Remove all remaining non-alphanumeric / non-space characters
+ *  5. Collapse whitespace
+ *  6. Apply nickname alias resolution
  */
 function normalizeName(name: string): string {
-  return name
-    .replace(/\s*\([^)]*\)/g, "")   // strip "(DTD)", "(SP, DH)", etc.
+  const raw = name
+    .replace(/\s*\([^)]*\)/g, "")          // strip "(DTD)", "(SP, DH)", etc.
+    .normalize("NFD")                        // decompose accented chars: é → e + ̀
+    .replace(/[\u0300-\u036f]/g, "")        // strip combining diacritics
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/[^a-z0-9 ]/g, "")            // remove dots, apostrophes, hyphens, etc.
     .replace(/\s+/g, " ")
     .trim();
+  return NAME_ALIASES[raw] ?? raw;
 }
+
+/**
+ * Nickname / alternate-name aliases.
+ * Key   = what the external file (ESPN, Yahoo) may call the player
+ * Value = how the player is stored in the DB (typically the FantasyPros name)
+ *
+ * Common sources of mismatch:
+ *  - ESPN uses legal/full first names; FP uses nicknames
+ *  - Different conventions for suffixes (Jr., II) or initials
+ */
+const NAME_ALIASES: Record<string, string> = {
+  // Catchers
+  "caleb raleigh":        "cal raleigh",
+
+  // Pitchers / position players — add as discovered via import warnings
+  "nicholas castellanos": "nick castellanos",
+  "michael brosseau":     "mike brosseau",
+  "michael yastrzemski":  "mike yastrzemski",
+  "nathaniel lowe":       "nate lowe",
+  "nathaniel eaton":      "nate eaton",
+  "cameron rupp":         "cam rupp",
+  "christopher morel":    "christopher morel",   // already matches; placeholder pattern
+  "gilbert lara":         "gilbert lara",
+};
 
 export interface ParsedRankSource {
   name: string;

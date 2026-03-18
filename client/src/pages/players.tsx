@@ -46,7 +46,10 @@ export default function Players() {
       if (json.parsed?.yahoo) parts.push(`Yahoo: ${json.parsed.yahoo}`);
       const parsedInfo = parts.length ? ` (${parts.join(', ')} parsed)` : '';
       const espnColInfo = json.espnRankCol ? ` · ESPN rank col: "${json.espnRankCol}"` : '';
-      setImportMsg({ text: `✓ Import complete — ${json.updated} updated, ${json.inserted} new.${parsedInfo}${espnColInfo}`, ok: true });
+      const unmatchedInfo = json.unmatchedEspn?.length
+        ? ` ⚠ ${json.unmatchedEspn.length} ESPN name(s) not matched: ${json.unmatchedEspn.join(', ')}`
+        : '';
+      setImportMsg({ text: `✓ Import complete — ${json.updated} updated, ${json.inserted} new.${parsedInfo}${espnColInfo}${unmatchedInfo}`, ok: json.unmatchedEspn?.length === 0 });
       setFpFile(null); setEspnFile(null); setYahooFile(null);
       if (fpRef.current)    fpRef.current.value    = '';
       if (espnRef.current)  espnRef.current.value  = '';

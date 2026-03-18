@@ -260,6 +260,7 @@ export async function registerRoutes(
         ok: true, ...result,
         parsed: { fp: fp.size, espn: espn.size, yahoo: yahoo.size },
         espnRankCol: espnResult ? (espnResult.rankColExists ? espnResult.rankCol : `ROW_INDEX (no "${espnResult.rankCol}" col — file cols: ${espnResult.fileColumns.slice(0,8).join(', ')})`) : null,
+        unmatchedEspn: result.unmatched.espn,
       });
     } catch (err: any) {
       console.error("Import error:", err);
