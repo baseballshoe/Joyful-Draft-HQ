@@ -88,7 +88,7 @@ export default function RoundStrategy() {
               {rows.map((row, i) => {
                 const tc = TIER_COLORS[row.tier] ?? TIER_COLORS['DEPTH'];
                 return (
-                  <tr key={row.id} style={{ background: i % 2 === 0 ? '#FAFBFF' : 'var(--joyt-card)' }}
+                  <tr key={row.id} style={{ background: i % 2 === 0 ? 'var(--joyt-surface)' : 'var(--joyt-card)' }}
                     data-testid={`row-strategy-${row.roundNum}`}>
                     <td><span style={{ fontWeight: 700, fontSize: 16 }}>{row.roundNum}</span></td>
                     <td style={{ color: 'var(--joyt-text-light)', fontSize: 12 }}>{row.picksRange}</td>

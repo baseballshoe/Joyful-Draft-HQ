@@ -64,7 +64,7 @@ export default function ByPosition() {
             <div key={p.id} style={{
               display: 'flex', alignItems: 'center', padding: '8px 12px',
               borderBottom: '1px solid var(--joyt-border)',
-              background: i % 2 === 0 ? '#F9FAFB' : 'var(--joyt-card)',
+              background: i % 2 === 0 ? 'var(--joyt-surface)' : 'var(--joyt-card)',
             }}>
               <span style={{ width: 20, fontWeight: 700, fontSize: 13, color: POS_COLOR[pos] }}>{i + 1}</span>
               <span style={{ flex: 1, fontWeight: 700, fontSize: 13, overflow: 'hidden',
