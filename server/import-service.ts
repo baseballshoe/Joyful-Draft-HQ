@@ -189,21 +189,16 @@ export function parseESPNBuffer(buffer: Buffer): ESPNParseResult {
     return candidates[0]; // fallback — will produce null values, logged below
   };
 
-  // Simple direct column lookup — use exactly what the file provides.
-  // User's ESPN file has: Rank | Player | Team | Elig. Pos.
-  const rankCol    = findKey("Rank", "RK", "Rk", "Overall Rank", "OVR", "Projected Rank", "PRK", "Proj Rk", "rank");
+  // ESPN's "Rank" column is POSITION rank (Cal Raleigh = Catcher #1 = Rank 1),
+  // NOT overall rank. The file itself is already sorted by overall rank from
+  // top to bottom, so we always use the row's position index as the ESPN rank.
   const nameCol    = findKey("Player", "Name", "Player Name", "PLAYER", "player name", "name");
   const teamCol    = findKey("Team", "TEAM", "Team Abbrev", "Tm", "team");
   const posCol     = findKey("Elig. Pos.", "Position", "POS", "Pos", "Eligible Positions", "position", "pos");
   const auctionCol = findKey("Auction Value", "Value", "Auction $", "$ Value", "Auction", "auction value");
+  const rankCol    = "row-index (file is pre-sorted by overall rank)";
 
-  // A column "exists" if it's actually present in the file headers.
-  const rankColExists = keys.some(k => k.toLowerCase().trim() === rankCol.toLowerCase().trim());
-
-  if (!rankColExists) {
-    console.warn(`[ESPN import] rank column "${rankCol}" not found — falling back to row-index. File columns: ${keys.join(", ")}`);
-  }
-  console.log("[ESPN import] detected columns →", { rankCol, rankColExists, nameCol, teamCol, posCol, auctionCol });
+  console.log("[ESPN import] detected columns →", { rankCol, nameCol, teamCol, posCol, auctionCol });
   console.log("[ESPN import] sample row →", rows[0]);
 
   const map = new Map<string, ParsedRankSource>();
@@ -213,9 +208,8 @@ export function parseESPNBuffer(buffer: Buffer): ESPNParseResult {
     const rawName = row[nameCol];
     if (!rawName) continue;
     const name    = rawName.toString().trim();
-    const parsedRank = parseInt(row[rankCol]);
-    // If the rank column doesn't exist or its value isn't numeric, fall back to row position.
-    const rank = rankColExists && !isNaN(parsedRank) ? parsedRank : (rankColExists ? null : rowIdx);
+    // Always use row position as overall rank — ESPN file is sorted by overall rank.
+    const rank = rowIdx;
     const pos     = (row[posCol]  ?? "").toString().trim();
     const auction = parseFloat(row[auctionCol]);
     map.set(normalizeName(name), {
@@ -227,7 +221,7 @@ export function parseESPNBuffer(buffer: Buffer): ESPNParseResult {
     });
   }
   console.log(`[ESPN import] parsed ${map.size} players`);
-  return { map, rankCol, rankColExists, fileColumns: keys };
+  return { map, rankCol, rankColExists: true, fileColumns: keys };
 }
 
 // ── Yahoo XLSX / CSV ──────────────────────────────────────────────────────────
