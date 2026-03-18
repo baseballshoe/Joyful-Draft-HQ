@@ -14,17 +14,6 @@ const SLOT_COLOR: Record<string, string> = {
 };
 const H2H_CATS = ['AVG', 'HR', 'SB', 'RBI', 'R', 'QS', 'SAVE', 'ERA', 'WHIP', 'K'];
 
-function SlotBadge({ slot }: { slot?: string | null }) {
-  if (!slot) return null;
-  const color = SLOT_COLOR[slot] ?? 'var(--joyt-text-mid)';
-  return (
-    <span style={{
-      display: 'inline-block', padding: '2px 7px', borderRadius: 5,
-      background: `${color}22`, color, fontWeight: 700, fontSize: 11, letterSpacing: '.03em',
-    }}>{slot}</span>
-  );
-}
-
 export default function MyRoster() {
   const [myPicks, setMyPicks] = useState<any[]>([]);
 
@@ -32,7 +21,13 @@ export default function MyRoster() {
     api.getPlayers({ status: 'mine' }).then(setMyPicks);
   }, []);
 
-  // Count by rosterSlot (fall back to posDisplay for legacy data)
+  const bySlot: Record<string, any[]> = {};
+  myPicks.forEach((p) => {
+    const slot = p.rosterSlot ?? p.posDisplay;
+    if (!bySlot[slot]) bySlot[slot] = [];
+    bySlot[slot].push(p);
+  });
+
   const counts: Record<string, number> = {};
   myPicks.forEach((p) => {
     const slot = p.rosterSlot ?? p.posDisplay;
@@ -41,6 +36,7 @@ export default function MyRoster() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+
       {/* Position tiles */}
       <div style={{
         display: 'flex', gap: 6, padding: '8px 10px',
@@ -67,62 +63,118 @@ export default function MyRoster() {
         })}
       </div>
 
-      {/* Draft picks table */}
+      {/* Grouped by position */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px' }}>
-        <div className="joyt-card" style={{ overflow: 'hidden' }}>
-          <div className="joyt-card-header">
-            <span className="dot" style={{ background: 'var(--joyt-green)' }} />
-            <h3>My Draft Picks</h3>
+        {myPicks.length === 0 ? (
+          <div className="joyt-card" style={{ padding: 40, textAlign: 'center', color: 'var(--joyt-text-light)' }}>
+            Mark players as "Mine" to track your draft picks — roster slots are assigned automatically
           </div>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th style={{ width: 60 }}>PICK #</th>
-                <th style={{ minWidth: 160 }}>PLAYER</th>
-                <th style={{ width: 56 }}>POS</th>
-                <th style={{ width: 80 }}>SLOT</th>
-                <th style={{ width: 56 }}>TEAM</th>
-                <th style={{ width: 86 }}>CONSENSUS</th>
-                <th style={{ width: 76 }}>FP RANK</th>
-                <th style={{ width: 90 }}>ROUND TIER</th>
-                <th style={{ width: 100 }}>PRIORITY</th>
-                <th>NOTES</th>
-              </tr>
-            </thead>
-            <tbody>
-              {myPicks.map((p, i) => (
-                <tr key={p.id} data-testid={`row-mypick-${p.id}`}>
-                  <td>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {ROSTER_SLOTS.map(({ pos }) => {
+              const players = bySlot[pos] ?? [];
+              if (players.length === 0) return null;
+              const color = SLOT_COLOR[pos] ?? 'var(--joyt-text-mid)';
+              return (
+                <div key={pos} className="joyt-card" style={{ overflow: 'hidden' }}>
+                  {/* Section header */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 14px',
+                    borderBottom: '1px solid var(--joyt-border)',
+                    background: `${color}10`,
+                  }}>
                     <span style={{
-                      width: 32, height: 32, borderRadius: '50%',
-                      background: 'var(--joyt-amber)', color: '#fff',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      fontWeight: 700, fontSize: 13,
-                    }}>{i + 1}</span>
-                  </td>
-                  <td><span style={{ fontWeight: 700, fontSize: 14 }}>{p.name}</span></td>
-                  <td><PosBadge pos={p.posDisplay} /></td>
-                  <td><SlotBadge slot={p.rosterSlot} /></td>
-                  <td style={{ color: 'var(--joyt-text-mid)' }}>{p.team}</td>
-                  <td style={{ color: 'var(--joyt-text-mid)' }}>#{p.consensusRank ? Math.round(p.consensusRank) : '—'}</td>
-                  <td style={{ color: 'var(--joyt-text-mid)' }}>#{p.fpRank ?? '—'}</td>
-                  <td style={{ color: 'var(--joyt-text-mid)' }}>Rd {Math.ceil((p.consensusRank ?? 1) / 12)}</td>
-                  <td style={{ fontWeight: 700, color: 'var(--joyt-amber)' }}>
-                    #{Math.round(p.priorityRank)}
-                  </td>
-                  <td style={{ color: 'var(--joyt-text-mid)', fontSize: 12 }}>{p.notes || '—'}</td>
-                </tr>
-              ))}
-              {myPicks.length === 0 && (
-                <tr>
-                  <td colSpan={10} style={{ padding: 40, textAlign: 'center', color: 'var(--joyt-text-light)' }}>
-                    Mark players as "Mine" to track your draft picks — roster slots are assigned automatically
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                      width: 34, height: 34, borderRadius: 8,
+                      background: `${color}22`, color, fontWeight: 700, fontSize: 13,
+                    }}>{pos}</span>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--joyt-text)' }}>
+                      {pos === 'C' ? 'Catcher' : pos === '1B' ? 'First Base' : pos === '2B' ? 'Second Base'
+                        : pos === '3B' ? 'Third Base' : pos === 'SS' ? 'Shortstop' : pos === 'OF' ? 'Outfield'
+                        : pos === 'Util' ? 'Utility' : pos === 'SP' ? 'Starting Pitcher'
+                        : pos === 'RP' ? 'Relief Pitcher' : pos === 'P' ? 'Pitcher' : 'Bench'}
+                    </span>
+                    <span style={{
+                      marginLeft: 'auto', fontSize: 11, fontWeight: 700,
+                      color, background: `${color}20`, padding: '2px 10px', borderRadius: 20,
+                    }}>
+                      {players.length} player{players.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+
+                  {/* Players in this slot */}
+                  {players.map((p: any, i: number) => (
+                    <div key={p.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '10px 14px',
+                      borderBottom: i < players.length - 1 ? '1px solid var(--joyt-border)' : 'none',
+                    }} data-testid={`row-roster-${p.id}`}>
+
+                      {/* Draft order bubble */}
+                      <span style={{
+                        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                        background: 'var(--joyt-amber)', color: '#fff',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        fontWeight: 700, fontSize: 11,
+                      }}>
+                        {myPicks.findIndex(x => x.id === p.id) + 1}
+                      </span>
+
+                      {/* Position badge */}
+                      <PosBadge pos={p.posDisplay} />
+
+                      {/* Name + team */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--joyt-text)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {p.name}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--joyt-text-light)', marginTop: 1 }}>
+                          {p.team}
+                        </div>
+                      </div>
+
+                      {/* Stats */}
+                      <div style={{ display: 'flex', gap: 18, flexShrink: 0, alignItems: 'center' }}>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 10, color: 'var(--joyt-text-light)', fontWeight: 600 }}>CONSENSUS</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--joyt-text-mid)' }}>
+                            #{p.consensusRank ? Math.round(p.consensusRank) : '—'}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 10, color: 'var(--joyt-text-light)', fontWeight: 600 }}>FP RANK</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--joyt-text-mid)' }}>
+                            #{p.fpRank ?? '—'}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 10, color: 'var(--joyt-text-light)', fontWeight: 600 }}>ROUND</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--joyt-text-mid)' }}>
+                            {Math.ceil((p.consensusRank ?? 1) / 12)}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 10, color: 'var(--joyt-text-light)', fontWeight: 600 }}>PRIORITY</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--joyt-amber)' }}>
+                            #{Math.round(p.priorityRank)}
+                          </div>
+                        </div>
+                        {p.notes && (
+                          <div style={{ maxWidth: 160, fontSize: 11, color: 'var(--joyt-text-light)',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {p.notes}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* H2H categories footer */}
