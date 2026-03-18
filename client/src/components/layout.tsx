@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from "wouter";
 import { useDraftState, useUpdateDraftState } from "@/hooks/use-draft";
 import { useWebSocket } from "@/hooks/use-websocket";
@@ -11,11 +12,30 @@ const TABS = [
   { path: '/round-strategy', label: 'Round Strategy' },
 ];
 
+const DARK_KEY = 'joyt_dark';
+
+function useDarkMode() {
+  const [dark, setDark] = useState(() => localStorage.getItem(DARK_KEY) === '1');
+
+  useEffect(() => {
+    if (dark) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem(DARK_KEY, '1');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.removeItem(DARK_KEY);
+    }
+  }, [dark]);
+
+  return [dark, setDark] as const;
+}
+
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { data: draftState } = useDraftState();
   const updateDraftState = useUpdateDraftState();
   const { connected } = useWebSocket();
+  const [dark, setDark] = useDarkMode();
 
   function handleRankModeChange(mode: string) {
     updateDraftState.mutate({ rankMode: mode });
@@ -83,6 +103,18 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <option value="consensus">Consensus Rank</option>
             </select>
           )}
+
+          {/* Dark mode toggle */}
+          <button
+            className="dark-toggle"
+            onClick={() => setDark((d) => !d)}
+            title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+            data-testid="button-dark-mode"
+          >
+            <span style={{ fontSize: 14 }}>{dark ? '☀️' : '🌙'}</span>
+            {dark ? 'Light' : 'Dark'}
+          </button>
+
           {/* Live sync indicator */}
           <span style={{
             display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,

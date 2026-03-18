@@ -23,23 +23,22 @@ function PlayerListRow({ player, rank, accentColor, onUpdate }: any) {
       display: 'flex', alignItems: 'flex-start', gap: 8,
       padding: '8px 12px', borderBottom: '1px solid var(--joyt-border)',
     }}>
-      <span style={{ fontSize: 14, fontWeight: 700, color: accentColor, minWidth: 20 }}>{rank}</span>
+      <span style={{ fontSize: 14, fontWeight: 700, color: accentColor, minWidth: 20, flexShrink: 0 }}>{rank}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <PosBadge pos={player.posDisplay} />
-          <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--joyt-text)' }} title={player.name}>
+          <span style={{
+            fontWeight: 700, fontSize: 13, color: 'var(--joyt-text)',
+            flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }} title={player.name}>
             {player.name}
           </span>
+          <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--joyt-amber)', flexShrink: 0 }}>
+            #{Math.round(player.priorityRank)}
+          </span>
         </div>
-        <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 4, marginTop: 5, flexWrap: 'wrap', alignItems: 'center' }}>
           {(player.tagsArray ?? []).map((t: string) => <TagPill key={t} tag={t} />)}
-        </div>
-      </div>
-      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--joyt-amber)' }}>
-          #{Math.round(player.priorityRank)}
-        </div>
-        <div style={{ marginTop: 4 }}>
           <ActionBtns player={player} onUpdate={onUpdate} size="sm" />
         </div>
       </div>
@@ -303,7 +302,7 @@ export default function Dashboard() {
         {/* Next best */}
         {data.nextBest && (
           <div style={{
-            background: '#FFFBF0', borderRadius: 10, padding: '10px 16px',
+            background: 'var(--joyt-amber-light)', borderRadius: 10, padding: '10px 16px',
             borderLeft: '4px solid var(--joyt-amber)', display: 'flex', alignItems: 'center', gap: 12,
           }}>
             <div>

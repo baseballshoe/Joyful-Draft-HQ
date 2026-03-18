@@ -68,6 +68,7 @@ html, body, #root {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ── LIGHT theme variables ────────────────────────────────────────── */
 :root {
   /* Page */
   --joyt-bg:          #F4F6FF;
@@ -138,11 +139,70 @@ html, body, #root {
   --nav-h:          56px;
 }
 
+/* ── DARK theme overrides ─────────────────────────────────────────── */
+html.dark {
+  /* Page */
+  --joyt-bg:          #13151C;
+  --joyt-card:        #1C1F2E;
+  --joyt-surface:     #252A3A;
+  --joyt-border:      #2D3448;
+
+  /* Header — deeper to separate from cards */
+  --joyt-header:      #0D0F14;
+  --joyt-header2:     #111419;
+  --joyt-header-sep:  #1A1E2A;
+
+  /* Brand */
+  --joyt-pink-light:  #2D1020;
+
+  /* Accent light variants — darkened for dark bg */
+  --joyt-green-light: #0B2118;
+  --joyt-amber-light: #251C06;
+  --joyt-blue-light:  #0C1A30;
+  --joyt-indigo-light:#111335;
+  --joyt-purple-light:#180E2E;
+  --joyt-red-light:   #260B0B;
+  --joyt-orange-light:#261507;
+  --joyt-teal-light:  #072028;
+
+  /* Text */
+  --joyt-text:        #E2E8F5;
+  --joyt-text-mid:    #8892A4;
+  --joyt-text-light:  #545E74;
+
+  /* Position bg variants */
+  --pos-of-bg:   #261507;
+  --pos-sp-bg:   #0C1A30;
+  --pos-rp-bg:   #180E2E;
+  --pos-c-bg:    #072028;
+  --pos-1b-bg:   #0B2118;
+  --pos-2b-bg:   #251C06;
+  --pos-3b-bg:   #2D1020;
+  --pos-ss-bg:   #260B0B;
+  --pos-dh-bg:   #1C1C1A;
+  --pos-util-bg: #1C1C1A;
+
+  /* Tag bg variants */
+  --tag-sleeper-bg:  #180E2E;
+  --tag-target-bg:   #251C06;
+  --tag-watch-bg:    #0C1A30;
+  --tag-injured-bg:  #261507;
+  --tag-skip-bg:     #260B0B;
+
+  /* Shadows */
+  --joyt-shadow-sm:  0 1px 3px rgba(0,0,0,.5);
+  --joyt-shadow:     0 4px 16px rgba(0,0,0,.6);
+  --joyt-shadow-lg:  0 8px 32px rgba(0,0,0,.7);
+}
+
 /* ── Dot-grid background ── */
 body {
   background-image: radial-gradient(circle, #DDE1F2 1px, transparent 1px);
   background-size: 22px 22px;
   background-attachment: fixed;
+}
+html.dark body {
+  background-image: radial-gradient(circle, #1E2130 1px, transparent 1px);
 }
 
 /* ── Scrollbars ── */
@@ -285,10 +345,10 @@ body {
   border-bottom: 1px solid var(--joyt-border);
   vertical-align: middle;
 }
-.data-table tr:nth-child(even) td { background: #FAFBFF; }
+.data-table tr:nth-child(even) td { background: var(--joyt-surface); }
 .data-table tr:hover td           { background: var(--joyt-indigo-light); }
-.data-table tr.status-mine td     { background: #F0F6FF; }
-.data-table tr.status-drafted td  { background: #FFF5F5; }
+.data-table tr.status-mine td     { background: var(--joyt-blue-light); }
+.data-table tr.status-drafted td  { background: var(--joyt-red-light); }
 
 /* ── Search input ── */
 .search-input {
@@ -401,6 +461,28 @@ select:focus { box-shadow: 0 0 0 2px var(--joyt-indigo); }
   transition: background .15s, color .15s, border-color .15s;
 }
 .scroll-nav-btn:hover {
+  background: var(--joyt-indigo-light);
+  color: var(--joyt-indigo);
+  border-color: var(--joyt-indigo);
+}
+
+/* ── Dark mode toggle button ── */
+.dark-toggle {
+  background: var(--joyt-surface);
+  border: 1px solid var(--joyt-border);
+  border-radius: 20px;
+  padding: 4px 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--joyt-text-mid);
+  font-family: var(--font-sans);
+  transition: all .15s;
+}
+.dark-toggle:hover {
   background: var(--joyt-indigo-light);
   color: var(--joyt-indigo);
   border-color: var(--joyt-indigo);
