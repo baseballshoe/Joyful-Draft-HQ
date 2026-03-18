@@ -299,13 +299,7 @@ export default function Players() {
                 <tr key={p.id} className={`status-${p.status}`} data-testid={`row-player-${p.id}`}>
                   <td>
                     <span className={`rank-num ${p.myRank ? 'custom' : 'consensus'}`}>
-                      #{p.myRank != null ? p.myRank : (() => {
-                        const fp = p.fpRank, espn = p.espnRank;
-                        if (fp != null && espn != null) return Math.round((fp + espn) / 2);
-                        if (fp != null) return fp;
-                        if (espn != null) return espn;
-                        return '—';
-                      })()}
+                      #{p.myRank != null ? p.myRank : p.priorityRank}
                     </span>
                   </td>
                   <td style={{ color: 'var(--joyt-text-mid)', fontSize: 12 }}>

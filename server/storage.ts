@@ -440,9 +440,8 @@ export class DatabaseStorage implements IStorage {
         SELECT id, ROW_NUMBER() OVER (
           ORDER BY
             consensus_rank ASC NULLS LAST,
-            fp_rank ASC NULLS LAST,
             espn_rank ASC NULLS LAST,
-            yahoo_rank ASC NULLS LAST,
+            fp_rank ASC NULLS LAST,
             id ASC
         ) AS new_rank
         FROM players
