@@ -40,31 +40,29 @@ function PosFilterBar({ value, onChange, accent = 'var(--joyt-blue)' }: {
   );
 }
 
-// ── Player row for target/sleeper lists ───────────────────────────────────
+// ── Player row for target/sleeper/breakout lists ──────────────────────────
 function PlayerListRow({ player, rank, accentColor, onUpdate }: any) {
   return (
     <div style={{
-      display: 'flex', alignItems: 'flex-start', gap: 8,
-      padding: '8px 12px', borderBottom: '1px solid var(--joyt-border)',
+      padding: '8px 10px', borderBottom: '1px solid var(--joyt-border)',
     }}>
-      <span style={{ fontSize: 14, fontWeight: 700, color: accentColor, minWidth: 20, flexShrink: 0 }}>{rank}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <PosBadge pos={player.posDisplay} />
-          <span style={{
-            fontWeight: 700, fontSize: 13, color: 'var(--joyt-text)',
-            flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }} title={player.name}>
-            {player.name}
-          </span>
-          <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--joyt-amber)', flexShrink: 0 }}>
-            #{Math.round(player.priorityRank)}
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: 4, marginTop: 5, flexWrap: 'wrap', alignItems: 'center' }}>
-          {(player.tagsArray ?? []).map((t: string) => <TagPill key={t} tag={t} />)}
-          <ActionBtns player={player} onUpdate={onUpdate} size="sm" />
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: accentColor, minWidth: 18, flexShrink: 0 }}>{rank}</span>
+        <PosBadge pos={player.posDisplay} />
+        <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--joyt-amber)', flexShrink: 0, marginLeft: 'auto' }}>
+          #{Math.round(player.priorityRank)}
+        </span>
+      </div>
+      <div style={{
+        fontWeight: 700, fontSize: 13, color: 'var(--joyt-text)',
+        paddingLeft: 24, marginBottom: 4,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }} title={player.name}>
+        {player.name}
+      </div>
+      <div style={{ display: 'flex', gap: 4, paddingLeft: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+        {(player.tagsArray ?? []).map((t: string) => <TagPill key={t} tag={t} />)}
+        <ActionBtns player={player} onUpdate={onUpdate} size="sm" />
       </div>
     </div>
   );
@@ -291,9 +289,10 @@ export default function Dashboard() {
   const { data: draftState } = useDraftState();
   const picksScrollRef = useRef<HTMLDivElement>(null);
 
-  // Position filters for the three list sections
+  // Position filters for the list sections
   const [targetPos,    setTargetPos]    = useState('ALL');
   const [sleeperPos,   setSleeperPos]   = useState('ALL');
+  const [breakoutPos,  setBreakoutPos]  = useState('ALL');
   const [bestAvailPos, setBestAvailPos] = useState('ALL');
 
   const load = useCallback(async () => {
@@ -479,8 +478,8 @@ export default function Dashboard() {
           <BestByPos bestByPos={data.bestByPos ?? {}} onUpdate={handlePlayerUpdate} />
         </Card>
 
-        {/* Col C Row 2: Sleepers + Top 5 */}
-        <div style={{ gridColumn: 3, gridRow: 2, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {/* Col C Row 2: Sleepers + Breakout + Top 5 */}
+        <div style={{ gridColumn: 3, gridRow: 2, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           <Card accent="var(--joyt-purple)" title="Sleepers (tagged)"
             style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
             bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -521,6 +520,26 @@ export default function Dashboard() {
                       </div>
                     </div>
                   </div>
+                ));
+              })()}
+            </div>
+          </Card>
+
+          <Card accent="var(--tag-breakout)" title="Breakout Players"
+            style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <PosFilterBar value={breakoutPos} onChange={setBreakoutPos} accent="var(--tag-breakout)" />
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {(() => {
+                const list = (data.breakout ?? []).filter((p: any) => breakoutPos === 'ALL' || p.posDisplay === breakoutPos);
+                if (list.length === 0) return (
+                  <div style={{ padding: 16, color: 'var(--joyt-text-light)', fontSize: 12 }}>
+                    {breakoutPos === 'ALL' ? 'Tag players as "breakout" to see them here' : `No ${breakoutPos} breakout players tagged`}
+                  </div>
+                );
+                return list.map((p: any, i: number) => (
+                  <PlayerListRow key={p.id} player={p} rank={i + 1}
+                    accentColor="var(--tag-breakout)" onUpdate={handlePlayerUpdate} />
                 ));
               })()}
             </div>

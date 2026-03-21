@@ -76,6 +76,7 @@ export type DashboardData = {
   myRoster: EnrichedPlayer[];
   top10Targets: EnrichedPlayer[];
   sleepers: EnrichedPlayer[];
+  breakout: EnrichedPlayer[];
   top5: EnrichedPlayer[];
   bestByPos: Record<string, EnrichedPlayer | null>;
   roundData: Record<number, EnrichedPlayer[]>;

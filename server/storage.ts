@@ -211,6 +211,11 @@ export class DatabaseStorage implements IStorage {
       .limit(10);
     const sleepers = availAndSleeper.map(enrichPlayer);
 
+    const availAndBreakout = await db.select().from(players)
+      .where(and(eq(players.status, 'available'), sql`',' || ${players.tags} || ',' LIKE '%,breakout,%'`))
+      .orderBy(orderByMode);
+    const breakout = availAndBreakout.map(enrichPlayer);
+
     const availTop5 = await db.select().from(players)
       .where(eq(players.status, 'available'))
       .orderBy(orderByMode)
@@ -272,6 +277,7 @@ export class DatabaseStorage implements IStorage {
       myRoster,
       top10Targets,
       sleepers,
+      breakout,
       top5,
       bestByPos,
       roundData,

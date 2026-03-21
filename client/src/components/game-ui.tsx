@@ -28,11 +28,12 @@ export function PosBadge({ pos, style }: { pos: string; style?: React.CSSPropert
 
 // ── Tag pill ───────────────────────────────────────────────────────────────
 const TAG_STYLE: Record<string, { color: string; bg: string }> = {
-  sleeper: { color: 'var(--tag-sleeper)', bg: 'var(--tag-sleeper-bg)' },
-  target:  { color: 'var(--tag-target)',  bg: 'var(--tag-target-bg)'  },
-  watch:   { color: 'var(--tag-watch)',   bg: 'var(--tag-watch-bg)'   },
-  injured: { color: 'var(--tag-injured)', bg: 'var(--tag-injured-bg)' },
-  skip:    { color: 'var(--tag-skip)',    bg: 'var(--tag-skip-bg)'    },
+  sleeper:  { color: 'var(--tag-sleeper)',  bg: 'var(--tag-sleeper-bg)'  },
+  target:   { color: 'var(--tag-target)',   bg: 'var(--tag-target-bg)'   },
+  watch:    { color: 'var(--tag-watch)',    bg: 'var(--tag-watch-bg)'    },
+  injured:  { color: 'var(--tag-injured)',  bg: 'var(--tag-injured-bg)'  },
+  skip:     { color: 'var(--tag-skip)',     bg: 'var(--tag-skip-bg)'     },
+  breakout: { color: 'var(--tag-breakout)', bg: 'var(--tag-breakout-bg)' },
 };
 
 export function TagPill({ tag }: { tag: string }) {
@@ -181,7 +182,7 @@ export function EditableRank({ value, playerId, field, color = 'amber', onSave }
 }
 
 // ── Tag selector (multi-select clickable pills) ────────────────────────────
-const ALL_TAGS = ['sleeper', 'target', 'watch', 'injured', 'skip'];
+const ALL_TAGS = ['sleeper', 'target', 'breakout', 'watch', 'injured', 'skip'];
 
 interface TagSelectorProps {
   tags: string[];

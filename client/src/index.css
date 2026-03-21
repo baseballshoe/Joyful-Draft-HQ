@@ -127,6 +127,7 @@ html, body, #root {
   --tag-watch:      #3B82F6; --tag-watch-bg:    #EFF6FF;
   --tag-injured:    #F97316; --tag-injured-bg:  #FFF7ED;
   --tag-skip:       #EF4444; --tag-skip-bg:     #FEF2F2;
+  --tag-breakout:   #10B981; --tag-breakout-bg: #ECFDF5;
 
   /* Shadows */
   --joyt-shadow-sm:  0 1px 3px rgba(99,102,241,.08), 0 1px 2px rgba(0,0,0,.06);
@@ -188,6 +189,7 @@ html.dark {
   --tag-watch-bg:    #0C1A30;
   --tag-injured-bg:  #261507;
   --tag-skip-bg:     #260B0B;
+  --tag-breakout-bg: #052E1C;
 
   /* Shadows */
   --joyt-shadow-sm:  0 1px 3px rgba(0,0,0,.5);
