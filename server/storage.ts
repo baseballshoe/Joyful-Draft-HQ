@@ -404,6 +404,22 @@ export class DatabaseStorage implements IStorage {
           unmatchedEspn.push(espnPlayer.name);
         }
       }
+
+      // When ESPN is uploaded without FP, null out espnRank for DB players not in
+      // this ESPN file — their old rank was stale (e.g. position rank from old file).
+      if (!hasFP) {
+        for (const existing of existingRows) {
+          const key = normalizeName(existing.name);
+          if (espn.has(key)) continue; // just updated above
+          if (existing.espnRank !== null) {
+            const consensus = calcConsensus(existing.fpRank, null, existing.yahooRank, maxRank);
+            await db.update(players)
+              .set({ espnRank: null, consensusRank: consensus, updatedAt: new Date() })
+              .where(eq(players.id, existing.id));
+            updated++;
+          }
+        }
+      }
     }
 
     // Also update Yahoo-only players that exist in our DB
