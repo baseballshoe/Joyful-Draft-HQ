@@ -403,7 +403,7 @@ export default function Dashboard() {
 
       {/* Main grid */}
       <div style={{
-        flex: 1, overflowY: 'auto', padding: 8,
+        flex: 1, overflow: 'hidden', padding: 8,
         display: 'grid',
         gridTemplateColumns: '184px 190px 1fr 172px',
         gridTemplateRows: '1fr 1fr',
@@ -479,7 +479,7 @@ export default function Dashboard() {
         </Card>
 
         {/* Col C Row 2: Sleepers + Breakout + Top 5 */}
-        <div style={{ gridColumn: 3, gridRow: 2, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <div style={{ gridColumn: 3, gridRow: 2, overflow: 'hidden', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           <Card accent="var(--joyt-purple)" title="Sleepers (tagged)"
             style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
             bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
