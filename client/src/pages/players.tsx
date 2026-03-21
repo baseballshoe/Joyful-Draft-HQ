@@ -4,7 +4,7 @@ import { PosBadge, TagPill, TagSelector, ActionBtns, StatusPill, EditableRank } 
 
 const POSITIONS = ['All', 'C', '1B', '2B', '3B', 'SS', 'OF', 'SP', 'RP', 'DH'];
 const STATUSES  = ['all', 'available', 'mine', 'drafted'];
-const TAGS      = ['all', 'sleeper', 'target', 'watch', 'injured', 'skip'];
+const TAGS      = ['all', 'sleeper', 'breakout', 'target', 'watch', 'injured', 'skip'];
 
 export default function Players() {
   const [players, setPlayers] = useState<any[]>([]);
@@ -112,7 +112,7 @@ export default function Players() {
     available: 'active-green', mine: 'active-blue', drafted: 'active-red', all: '',
   };
   const tagColors: Record<string, string> = {
-    sleeper: 'active-purple', target: 'active-amber', watch: 'active-blue',
+    sleeper: 'active-purple', breakout: 'active-green', target: 'active-amber', watch: 'active-blue',
     injured: 'active-orange', skip: 'active-red', all: '',
   };
 

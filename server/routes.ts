@@ -71,6 +71,17 @@ async function seedDatabase() {
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
+// Active session tracking — expires after 45 seconds of no heartbeat
+const activeSessions = new Map<string, number>();
+const SESSION_TTL_MS = 45_000;
+
+function pruneExpiredSessions() {
+  const cutoff = Date.now() - SESSION_TTL_MS;
+  for (const [id, ts] of activeSessions) {
+    if (ts < cutoff) activeSessions.delete(id);
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -95,6 +106,21 @@ export async function registerRoutes(
   wss.on("connection", (ws) => {
     // We don't necessarily need to handle incoming messages if all mutations are via REST,
     // but the template mentions websockets for real-time broadcast.
+  });
+
+  // Active users heartbeat
+  app.post('/api/heartbeat', (req, res) => {
+    const { sessionId } = req.body ?? {};
+    if (sessionId && typeof sessionId === 'string') {
+      activeSessions.set(sessionId, Date.now());
+    }
+    pruneExpiredSessions();
+    res.json({ activeUsers: activeSessions.size });
+  });
+
+  app.get('/api/active-users', (req, res) => {
+    pruneExpiredSessions();
+    res.json({ activeUsers: activeSessions.size });
   });
 
   // Draft State

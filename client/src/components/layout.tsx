@@ -1,7 +1,32 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from "wouter";
 import { useDraftState, useUpdateDraftState } from "@/hooks/use-draft";
 import { useWebSocket } from "@/hooks/use-websocket";
+
+function useActiveUsers() {
+  const [count, setCount] = useState<number | null>(null);
+  const sessionId = useRef<string>(Math.random().toString(36).slice(2));
+
+  useEffect(() => {
+    async function heartbeat() {
+      try {
+        const res = await fetch('/api/heartbeat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: sessionId.current }),
+        });
+        const data = await res.json();
+        setCount(data.activeUsers);
+      } catch {}
+    }
+
+    heartbeat();
+    const timer = setInterval(heartbeat, 15_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return count;
+}
 
 const TABS = [
   { path: '/',               label: 'Dashboard'      },
@@ -36,6 +61,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const updateDraftState = useUpdateDraftState();
   const { connected } = useWebSocket();
   const [dark, setDark] = useDarkMode();
+  const activeUsers = useActiveUsers();
 
   function handleRankModeChange(mode: string) {
     updateDraftState.mutate({ rankMode: mode });
@@ -114,6 +140,23 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <span style={{ fontSize: 14 }}>{dark ? '☀️' : '🌙'}</span>
             {dark ? 'Light' : 'Dark'}
           </button>
+
+          {/* Active users counter */}
+          {activeUsers !== null && (
+            <span style={{
+              display: 'flex', alignItems: 'center', gap: 5, fontSize: 11,
+              background: 'var(--joyt-indigo-light)', borderRadius: 8,
+              padding: '3px 9px', color: 'var(--joyt-indigo)', fontWeight: 700,
+            }}
+            data-testid="status-active-users"
+            title="People currently in the draft room">
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: 'var(--joyt-indigo)', display: 'inline-block',
+              }} />
+              {activeUsers} {activeUsers === 1 ? 'user' : 'users'}
+            </span>
+          )}
 
           {/* Live sync indicator */}
           <span style={{
