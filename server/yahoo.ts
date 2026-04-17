@@ -258,18 +258,34 @@ export async function getMyRoster(teamKey: string): Promise<YahooRosterPlayer[]>
   for (let i = 0; i < (playersData?.count ?? 0); i++) {
     const p = playersData?.[i]?.player;
     if (!p) continue;
-    const info    = p[0];
-    const status  = p[1];
-    roster.push({
-      playerKey:       info?.[0]?.player_key,
-      playerId:        info?.[1]?.player_id,
-      name:            info?.[2]?.name?.full,
-      editorialTeam:   info?.[6]?.editorial_team_abbr,
-      displayPosition: info?.[4]?.display_position,
-      eligiblePositions: info?.[4]?.eligible_positions?.map((e: any) => e.position) ?? [],
-      selectedPosition: status?.[0]?.selected_position?.[1]?.position,
-      injuryStatus:     info?.[10]?.status ?? null,
-    });
+    const infoArr = p[0]; // array of attribute objects
+    const statusObj = p[1]; // object: { selected_position: [...] }
+
+    // Search through all attribute objects for a key (same pattern as getLeagueTeams)
+    const findAttr = (key: string) => {
+      if (!Array.isArray(infoArr)) return undefined;
+      for (const item of infoArr) {
+        if (item && typeof item === 'object' && key in item) return item[key];
+      }
+      return undefined;
+    };
+
+    // selected_position is on p[1] directly (not an array element), then [1].position
+    const selectedPos = statusObj?.selected_position?.[1]?.position ?? null;
+
+    const player = {
+      playerKey:         findAttr('player_key') ?? '',
+      playerId:          String(findAttr('player_id') ?? ''),
+      name:              findAttr('name')?.full ?? '',
+      editorialTeam:     findAttr('editorial_team_abbr') ?? '',
+      displayPosition:   findAttr('display_position') ?? '',
+      eligiblePositions: (findAttr('eligible_positions') ?? []).map((e: any) => e.position),
+      selectedPosition:  selectedPos,
+      injuryStatus:      findAttr('status') ?? null,
+    };
+
+    console.log(`[Yahoo roster] ${player.name} | slot=${player.selectedPosition} | pos=${player.displayPosition} | injury=${player.injuryStatus}`);
+    roster.push(player);
   }
   return roster;
 }
