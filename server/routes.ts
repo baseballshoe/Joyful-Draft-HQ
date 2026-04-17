@@ -453,11 +453,28 @@ export async function registerRoutes(
   app.post('/api/yahoo/sync-roster', async (_req, res) => {
     try {
       const [leagueRow] = await db.select().from(yahooLeague).where(eq(yahooLeague.id, 1));
-      if (!leagueRow?.myTeamKey) {
+      if (!leagueRow?.leagueKey) {
         return res.status(400).json({ message: 'No league selected. Please connect a league first.' });
       }
 
-      const rosterPlayers = await yahoo.getMyRoster(leagueRow.myTeamKey);
+      // If myTeamKey wasn't captured during league selection, re-fetch teams now
+      let myTeamKey = leagueRow.myTeamKey;
+      if (!myTeamKey) {
+        const teams = await yahoo.getLeagueTeams(leagueRow.leagueKey);
+        const myTeam = teams.find(t => t.isOwnedByCurrentLogin);
+        if (myTeam) {
+          myTeamKey = myTeam.teamKey;
+          await db.update(yahooLeague)
+            .set({ myTeamKey: myTeam.teamKey, myTeamName: myTeam.name })
+            .where(eq(yahooLeague.id, 1));
+        }
+      }
+
+      if (!myTeamKey) {
+        return res.status(400).json({ message: 'Could not find your team in this league. Try disconnecting and reconnecting.' });
+      }
+
+      const rosterPlayers = await yahoo.getMyRoster(myTeamKey);
 
       const allPlayers = await storage.getPlayers();
       const results = { synced: 0, unmatched: [] as string[] };

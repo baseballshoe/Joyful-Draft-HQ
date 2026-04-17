@@ -227,14 +227,25 @@ export async function getLeagueTeams(leagueKey: string): Promise<YahooTeam[]> {
 
   for (let i = 0; i < (teamsData?.count ?? 0); i++) {
     const t = teamsData?.[i]?.team?.[0];
-    if (!t) continue;
+    if (!t || !Array.isArray(t)) continue;
+
+    // Yahoo team[0] is an array of attribute objects — search through all of them
+    const findAttr = (key: string) => {
+      for (const item of t) {
+        if (item && typeof item === 'object' && key in item) return item[key];
+      }
+      return undefined;
+    };
+
     teams.push({
-      teamKey:  t[0]?.team_key,
-      teamId:   t[1]?.team_id,
-      name:     t[2]?.name,
-      isOwnedByCurrentLogin: t[0]?.is_owned_by_current_login === 1,
+      teamKey:  findAttr('team_key') ?? '',
+      teamId:   String(findAttr('team_id') ?? ''),
+      name:     findAttr('name') ?? '',
+      // Yahoo returns 1 (number) for the current user's team; also guard string "1"
+      isOwnedByCurrentLogin: Number(findAttr('is_owned_by_current_login')) === 1,
     });
   }
+  console.log(`[Yahoo] getLeagueTeams(${leagueKey}): found ${teams.length} teams, mine=${teams.find(t=>t.isOwnedByCurrentLogin)?.name ?? 'not found'}`);
   return teams;
 }
 
