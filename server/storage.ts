@@ -422,7 +422,7 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    // Also update Yahoo-only players that exist in our DB
+    // Also update (or insert) Yahoo-only players
     if (hasYahoo) {
       for (const [key, yahooPlayer] of yahoo.entries()) {
         if (fp.has(key) || espn.has(key)) continue; // already handled above
@@ -433,6 +433,21 @@ export class DatabaseStorage implements IStorage {
             .set({ yahooRank: yahooPlayer.rank, consensusRank: consensus, updatedAt: new Date() })
             .where(eq(players.id, existing.id));
           updated++;
+        } else {
+          // New player only seen in Yahoo rankings — insert them
+          const consensus = calcConsensus(null, null, yahooPlayer.rank, maxRank);
+          await db.insert(players).values({
+            name:          yahooPlayer.name,
+            team:          yahooPlayer.team || "",
+            positions:     yahooPlayer.posDisplay || "UTIL",
+            posDisplay:    yahooPlayer.posDisplay || "UTIL",
+            fpRank:        null,
+            espnRank:      null,
+            yahooRank:     yahooPlayer.rank,
+            consensusRank: consensus,
+            status:        "available",
+          });
+          inserted++;
         }
       }
     }
