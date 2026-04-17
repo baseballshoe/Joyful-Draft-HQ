@@ -13,6 +13,7 @@ import ByPosition from "./pages/by-position";
 import MyRoster from "./pages/my-roster";
 import CheatSheet from "./pages/cheat-sheet";
 import RoundStrategy from "./pages/round-strategy";
+import YahooSettings from './pages/yahoo-settings';
 
 const PASSWORD = 'drafthqjoyt';
 const STORAGE_KEY = 'joyt_auth';
@@ -97,6 +98,7 @@ function Router() {
         <Route path="/my-roster" component={MyRoster} />
         <Route path="/cheat-sheet" component={CheatSheet} />
         <Route path="/round-strategy" component={RoundStrategy} />
+        <Route path="/yahoo" component={YahooSettings} />
         <Route component={NotFound} />
       </Switch>
     </AppLayout>

@@ -35,6 +35,7 @@ const TABS = [
   { path: '/my-roster',      label: 'My Roster'      },
   { path: '/cheat-sheet',    label: 'Cheat Sheet'    },
   { path: '/round-strategy', label: 'Round Strategy' },
+  { path: '/yahoo', label: 'Yahoo ⚾' },
 ];
 
 const DARK_KEY = 'joyt_dark';
