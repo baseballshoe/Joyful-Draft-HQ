@@ -509,13 +509,20 @@ export async function registerRoutes(
         }
 
         if (match) {
-          // Use Yahoo's actual roster slot (SP, RP, 1B, OF, BN, IL, etc.)
+          // Normalize Yahoo slot: IL10, IL60, IL, NA → "IL"; everything else verbatim
+          const normalizeSlot = (s: string | undefined | null): string | undefined => {
+            if (!s) return undefined;
+            if (/^IL|^NA$/.test(s)) return 'IL';
+            return s;
+          };
+          const slot = normalizeSlot(yp.selectedPosition);
+
           // Use Yahoo's display position to fix players stored as "UTIL"
           const yahooPos = yp.displayPosition?.split(',')[0]?.trim() ?? null;
           const playerUpdates: UpdatePlayerRequest = {
             status: 'mine',
             // Pass slot explicitly so updatePlayer doesn't recompute it
-            ...(yp.selectedPosition ? { rosterSlot: yp.selectedPosition } : {}),
+            ...(slot ? { rosterSlot: slot } : {}),
             // Fix position only when DB has a placeholder value
             ...(yahooPos && (match.posDisplay === 'UTIL' || !match.posDisplay)
               ? { positions: yahooPos, posDisplay: yahooPos }

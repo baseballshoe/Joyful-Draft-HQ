@@ -5,12 +5,13 @@ import { PosBadge } from '@/components/game-ui';
 const ROSTER_SLOTS = [
   { pos: 'C', total: 1 }, { pos: '1B', total: 1 }, { pos: '2B', total: 1 }, { pos: '3B', total: 1 },
   { pos: 'SS', total: 1 }, { pos: 'OF', total: 4 }, { pos: 'Util', total: 1 }, { pos: 'SP', total: 4 },
-  { pos: 'RP', total: 2 }, { pos: 'P', total: 3 }, { pos: 'BN', total: 5 },
+  { pos: 'RP', total: 2 }, { pos: 'P', total: 3 }, { pos: 'BN', total: 5 }, { pos: 'IL', total: 4 },
 ];
 const SLOT_COLOR: Record<string, string> = {
   C: 'var(--joyt-teal)', '1B': 'var(--joyt-green)', '2B': 'var(--joyt-amber)', '3B': 'var(--joyt-pink)',
   SS: 'var(--joyt-red)', OF: 'var(--joyt-orange)', Util: 'var(--joyt-text-mid)',
   SP: 'var(--joyt-blue)', RP: 'var(--joyt-purple)', P: 'var(--joyt-blue)', BN: 'var(--joyt-text-light)',
+  IL: '#e05252',
 };
 const H2H_CATS = ['AVG', 'HR', 'SB', 'RBI', 'R', 'QS', 'SAVE', 'ERA', 'WHIP', 'K'];
 
@@ -93,7 +94,8 @@ export default function MyRoster() {
                       {pos === 'C' ? 'Catcher' : pos === '1B' ? 'First Base' : pos === '2B' ? 'Second Base'
                         : pos === '3B' ? 'Third Base' : pos === 'SS' ? 'Shortstop' : pos === 'OF' ? 'Outfield'
                         : pos === 'Util' ? 'Utility' : pos === 'SP' ? 'Starting Pitcher'
-                        : pos === 'RP' ? 'Relief Pitcher' : pos === 'P' ? 'Pitcher' : 'Bench'}
+                        : pos === 'RP' ? 'Relief Pitcher' : pos === 'P' ? 'Pitcher'
+                        : pos === 'IL' ? 'Injured List' : 'Bench'}
                     </span>
                     <span style={{
                       marginLeft: 'auto', fontSize: 11, fontWeight: 700,
