@@ -37,7 +37,7 @@ export default function YahooSettings() {
   const [leagues,      setLeagues]      = useState<YahooLeague[]>([]);
   const [loadingLeagues, setLoadingLeagues] = useState(false);
   const [syncing,      setSyncing]      = useState(false);
-  const [syncResult,   setSyncResult]   = useState<{ synced: number; unmatched: string[] } | null>(null);
+  const [syncResult,   setSyncResult]   = useState<{ synced: number; removed: number; unmatched: string[] } | null>(null);
   const [error,        setError]        = useState<string | null>(null);
 
   // Check for OAuth redirect params on mount
@@ -269,11 +269,12 @@ export default function YahooSettings() {
               {syncResult && (
                 <div style={{ background: 'var(--joyt-green-light)', borderRadius: 7, padding: '10px 14px', fontSize: 12 }}>
                   <div style={{ fontWeight: 700, color: 'var(--joyt-green)', marginBottom: 4 }}>
-                    ✓ Synced {syncResult.synced} players
+                    ✓ Synced {syncResult.synced} players to roster
+                    {syncResult.removed > 0 && `, removed ${syncResult.removed} no longer on team`}
                   </div>
                   {syncResult.unmatched.length > 0 && (
-                    <div style={{ color: 'var(--joyt-amber)' }}>
-                      Could not match {syncResult.unmatched.length} player{syncResult.unmatched.length !== 1 ? 's' : ''}:&nbsp;
+                    <div style={{ color: 'var(--joyt-amber)', marginTop: 4 }}>
+                      ⚠ Could not match {syncResult.unmatched.length} player{syncResult.unmatched.length !== 1 ? 's' : ''}:&nbsp;
                       {syncResult.unmatched.join(', ')}
                     </div>
                   )}

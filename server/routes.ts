@@ -477,19 +477,51 @@ export async function registerRoutes(
       const rosterPlayers = await yahoo.getMyRoster(myTeamKey);
 
       const allPlayers = await storage.getPlayers();
-      const results = { synced: 0, unmatched: [] as string[] };
+
+      // Normalize: strip accents (NFD decompose + drop combining marks), lowercase, strip non-alphanumeric
+      const normalize = (s: string) =>
+        s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      // Step 1: record who was previously on 'my roster' so we can clear stale entries
+      const prevMineIds = new Set(allPlayers.filter(p => p.status === 'mine').map(p => p.id));
+
+      const results = { synced: 0, unmatched: [] as string[], removed: 0 };
+      const newMineIds = new Set<number>();
 
       for (const yp of rosterPlayers) {
-        const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const match = allPlayers.find(p =>
-          normalize(p.name) === normalize(yp.name)
-        );
+        const ynorm = normalize(yp.name);
+
+        // Primary match: full accent-stripped name
+        let match = allPlayers.find(p => normalize(p.name) === ynorm);
+
+        // Fallback: last-name + first-initial match (handles suffix/Jr/III differences)
+        if (!match) {
+          const ylast = ynorm.split(' ').slice(-1)[0] ?? '';
+          const yfirst = ynorm.split(' ')[0]?.[0] ?? '';
+          if (ylast.length > 3) {
+            match = allPlayers.find(p => {
+              const pnorm = normalize(p.name);
+              const plast = pnorm.split(' ').slice(-1)[0] ?? '';
+              const pfirst = pnorm.split(' ')[0]?.[0] ?? '';
+              return plast === ylast && pfirst === yfirst;
+            });
+          }
+        }
 
         if (match) {
           await storage.updatePlayer(match.id, { status: 'mine' });
+          newMineIds.add(match.id);
           results.synced++;
         } else {
           results.unmatched.push(yp.name);
+        }
+      }
+
+      // Step 2: clear players who were on the roster but are no longer on Yahoo
+      for (const id of prevMineIds) {
+        if (!newMineIds.has(id)) {
+          await storage.updatePlayer(id, { status: 'available' });
+          results.removed++;
         }
       }
 
