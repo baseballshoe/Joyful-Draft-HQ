@@ -150,16 +150,19 @@ export class DatabaseStorage implements IStorage {
     let finalUpdates: UpdatePlayerRequest & { rosterSlot?: string | null } = { ...updates };
 
     if (updates.status === 'mine') {
-      // Get current roster slots (excluding this player)
-      const roster = await db.select({ rosterSlot: players.rosterSlot })
-        .from(players)
-        .where(and(eq(players.status, 'mine'), sql`${players.id} != ${id}`));
-      const currentSlots = roster.map((r) => r.rosterSlot).filter(Boolean) as string[];
+      // If an explicit rosterSlot was provided, honour it — don't recompute
+      if (!('rosterSlot' in updates)) {
+        // Get current roster slots (excluding this player)
+        const roster = await db.select({ rosterSlot: players.rosterSlot })
+          .from(players)
+          .where(and(eq(players.status, 'mine'), sql`${players.id} != ${id}`));
+        const currentSlots = roster.map((r) => r.rosterSlot).filter(Boolean) as string[];
 
-      // Get this player's posDisplay
-      const [current] = await db.select({ posDisplay: players.posDisplay }).from(players).where(eq(players.id, id));
-      if (current) {
-        finalUpdates.rosterSlot = computeRosterSlot(current.posDisplay, currentSlots);
+        // Get this player's posDisplay
+        const [current] = await db.select({ posDisplay: players.posDisplay }).from(players).where(eq(players.id, id));
+        if (current) {
+          finalUpdates.rosterSlot = computeRosterSlot(current.posDisplay, currentSlots);
+        }
       }
     } else if (updates.status && updates.status !== 'mine') {
       finalUpdates.rosterSlot = null;

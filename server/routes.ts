@@ -7,7 +7,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import multer from "multer";
 import { parseFPBuffer, parseESPNBuffer, parseYahooBuffer, type ESPNParseResult } from "./import-service";
 import * as yahoo from './yahoo';
-import { yahooLeague } from '@shared/schema';
+import { yahooLeague, type UpdatePlayerRequest } from '@shared/schema';
 import { db } from './db';
 import { eq } from 'drizzle-orm';
 
@@ -509,7 +509,19 @@ export async function registerRoutes(
         }
 
         if (match) {
-          await storage.updatePlayer(match.id, { status: 'mine' });
+          // Use Yahoo's actual roster slot (SP, RP, 1B, OF, BN, IL, etc.)
+          // Use Yahoo's display position to fix players stored as "UTIL"
+          const yahooPos = yp.displayPosition?.split(',')[0]?.trim() ?? null;
+          const playerUpdates: UpdatePlayerRequest = {
+            status: 'mine',
+            // Pass slot explicitly so updatePlayer doesn't recompute it
+            ...(yp.selectedPosition ? { rosterSlot: yp.selectedPosition } : {}),
+            // Fix position only when DB has a placeholder value
+            ...(yahooPos && (match.posDisplay === 'UTIL' || !match.posDisplay)
+              ? { positions: yahooPos, posDisplay: yahooPos }
+              : {}),
+          };
+          await storage.updatePlayer(match.id, playerUpdates);
           newMineIds.add(match.id);
           results.synced++;
         } else {
