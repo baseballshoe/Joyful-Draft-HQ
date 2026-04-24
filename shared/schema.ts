@@ -113,27 +113,24 @@ export const yahooLeague = pgTable("yahoo_league", {
 export type YahooTokens = typeof yahooTokens.$inferSelect;
 export type YahooLeagueRow = typeof yahooLeague.$inferSelect;
 
-// ── Player IDs across systems ────────────────────────────────────────────
-// Links a player in our DB to their MLBAM / FanGraphs / Yahoo IDs for
-// joining with advanced stats data.
+// ── Player IDs across systems (FIXED: added .unique() to player_id) ──────
 export const playerIds = pgTable("player_ids", {
   id:             serial("id").primaryKey(),
-  playerId:       integer("player_id").notNull(),  // FK to players.id
-  mlbamId:        integer("mlbam_id"),             // Baseball Savant / MLB ID
-  fangraphsId:    integer("fangraphs_id"),         // FanGraphs ID
-  bbrefId:        text("bbref_id"),                // Baseball Reference ID
-  yahooPlayerKey: text("yahoo_player_key"),        // e.g. "423.p.10835"
-  nameNormalized: text("name_normalized"),         // for fuzzy matching
+  playerId:       integer("player_id").notNull().unique(),  // ← THE FIX
+  mlbamId:        integer("mlbam_id"),
+  fangraphsId:    integer("fangraphs_id"),
+  bbrefId:        text("bbref_id"),
+  yahooPlayerKey: text("yahoo_player_key"),
+  nameNormalized: text("name_normalized"),
   updatedAt:      timestamp("updated_at").defaultNow(),
 });
 
-// ── Batter stats (season-to-date) ────────────────────────────────────────
+// ── Batter stats (unchanged) ────────────────────────────────────────────
 export const batterStats = pgTable("batter_stats", {
   id:          serial("id").primaryKey(),
   playerId:    integer("player_id").notNull(),
   season:      integer("season").notNull(),
 
-  // Basic counting stats
   games:       integer("games"),
   atBats:      integer("at_bats"),
   plateApps:   integer("plate_apps"),
@@ -148,7 +145,6 @@ export const batterStats = pgTable("batter_stats", {
   walks:       integer("walks"),
   strikeouts:  integer("strikeouts"),
 
-  // Rate stats
   avg:         real("avg"),
   obp:         real("obp"),
   slg:         real("slg"),
@@ -158,36 +154,31 @@ export const batterStats = pgTable("batter_stats", {
   wOBA:        real("w_oba"),
   wRCplus:     real("wrc_plus"),
 
-  // Advanced / Statcast
-  barrelPct:   real("barrel_pct"),       // barrels per batted ball event
-  hardHitPct:  real("hard_hit_pct"),     // 95+ mph exit velocity
+  barrelPct:   real("barrel_pct"),
+  hardHitPct:  real("hard_hit_pct"),
   avgExitVelo: real("avg_exit_velo"),
   maxExitVelo: real("max_exit_velo"),
   avgLaunchAngle: real("avg_launch_angle"),
-  xBA:         real("xba"),              // expected batting average
-  xSLG:        real("xslg"),             // expected slugging
-  xwOBA:       real("xwoba"),            // expected wOBA
+  xBA:         real("xba"),
+  xSLG:        real("xslg"),
+  xwOBA:       real("xwoba"),
 
-  // Plate discipline
-  chasePct:    real("chase_pct"),        // swing% on pitches out of zone
-  whiffPct:    real("whiff_pct"),        // swing & miss rate
+  chasePct:    real("chase_pct"),
+  whiffPct:    real("whiff_pct"),
   contactPct:  real("contact_pct"),
   zoneContactPct: real("zone_contact_pct"),
+  sprintSpeed: real("sprint_speed"),
 
-  // Splits
-  sprintSpeed: real("sprint_speed"),     // feet/second
-
-  dataSource:  text("data_source"),      // 'fangraphs' | 'savant' | 'merged'
+  dataSource:  text("data_source"),
   fetchedAt:   timestamp("fetched_at").defaultNow(),
 });
 
-// ── Pitcher stats (season-to-date) ───────────────────────────────────────
+// ── Pitcher stats (unchanged) ───────────────────────────────────────────
 export const pitcherStats = pgTable("pitcher_stats", {
   id:          serial("id").primaryKey(),
   playerId:    integer("player_id").notNull(),
   season:      integer("season").notNull(),
 
-  // Basic counting stats
   games:       integer("games"),
   gamesStarted: integer("games_started"),
   wins:        integer("wins"),
@@ -202,36 +193,31 @@ export const pitcherStats = pgTable("pitcher_stats", {
   strikeoutsPitched: integer("strikeouts_pitched"),
   homerunsAllowed: integer("homeruns_allowed"),
 
-  // Rate stats
   era:         real("era"),
   whip:        real("whip"),
   kPer9:       real("k_per_9"),
   bbPer9:      real("bb_per_9"),
-  kRate:       real("k_rate"),           // K%
-  bbRate:      real("bb_rate"),          // BB%
-  kMinusBB:    real("k_minus_bb"),       // K% - BB%
+  kRate:       real("k_rate"),
+  bbRate:      real("bb_rate"),
+  kMinusBB:    real("k_minus_bb"),
 
-  // Advanced
   fip:         real("fip"),
   xFIP:        real("x_fip"),
   siera:       real("siera"),
   xERA:        real("x_era"),
   war:         real("war"),
 
-  // Statcast — pitch profile
   avgFastballVelo: real("avg_fastball_velo"),
   maxFastballVelo: real("max_fastball_velo"),
   spinRate:    real("spin_rate"),
 
-  // Batted ball against
   barrelPctAgainst: real("barrel_pct_against"),
   hardHitPctAgainst: real("hard_hit_pct_against"),
   xwOBAagainst: real("xwoba_against"),
   xBAagainst:  real("xba_against"),
 
-  // Plate discipline induced
-  cswPct:      real("csw_pct"),          // called strike + whiff %
-  swStrikePct: real("sw_strike_pct"),    // swinging strike %
+  cswPct:      real("csw_pct"),
+  swStrikePct: real("sw_strike_pct"),
   chasePctInduced: real("chase_pct_induced"),
   zonePct:     real("zone_pct"),
 
