@@ -1,0 +1,33 @@
+name: Pull Stats
+
+# Runs nightly at 9:00 AM UTC (4:00 AM Eastern / 1:00 AM Pacific)
+# Also can be triggered manually from the Actions tab.
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:  # Manual trigger button
+
+jobs:
+  pull-stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      - name: Run stats pull
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python scripts/pull_stats.py
