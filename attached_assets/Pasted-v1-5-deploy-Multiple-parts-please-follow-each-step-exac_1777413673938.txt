@@ -1,0 +1,44 @@
+v1.5 deploy. Multiple parts — please follow each step exactly.
+
+1. Drop in NEW files from the v1.5 zip:
+   - .github/workflows/pull-yahoo-stats.yml
+   - scripts/pull_yahoo_stats.ts
+   - server/external/yahoo-stats.ts
+
+2. PATCH server/yahoo.ts:
+   Find the line: `async function yahooFetch(path: string): Promise<any> {`
+   Add the word `export` at the start: `export async function yahooFetch(...)`
+   That's the only change.
+
+3. PATCH server/coach/context.ts:
+   Find: `const SOURCE_PRIORITY = ['mlb-stats-api', 'fangraphs', 'savant'];`
+   Replace with: `const SOURCE_PRIORITY = ['yahoo', 'mlb-stats-api', 'fangraphs', 'savant'];`
+
+4. PATCH scripts/pull_stats.py per MIGRATION_NOTES_v1.5.md Step 4 — adds
+   FanGraphs name-fallback to both pull_fangraphs_pitchers and
+   pull_fangraphs_batters. Two key changes per function:
+   a) Build a name_to_pid map after the existing fg_to_pid map
+   b) When fg_to_pid lookup misses, try name_to_pid before skipping
+
+5. Verify GitHub repo secrets are set:
+   - DATABASE_URL (already there)
+   - YAHOO_CLIENT_ID (may need to add — copy from Replit Secrets)
+   - YAHOO_CLIENT_SECRET (may need to add)
+   - APP_BASE_URL (may need to add — value: https://drafthq.replit.app)
+
+6. Push to GitHub. The new workflow file will hit the OAuth scope wall
+   (same as v1.4 deploy). Use the same workaround:
+   - git rm --cached the workflow file, commit, push
+   - Create the workflow file via GitHub web UI
+   - git pull origin main back to Replit
+
+7. Trigger workflows in this order via GitHub Actions:
+   a) Pull stats (with FG name-fallback) — verify "FG pitcher matches: X by ID, Y by name" log
+   b) Pull Yahoo stats — verify summary numbers look right
+
+8. Run smoke tests in MIGRATION_NOTES Step 8:
+   - Messick should now have 3+ rows including yahoo with QS
+   - QS leaderboard should match Yahoo's league page
+   - Coach should mention QS naturally when asked about pitchers
+
+If anything fails, stop and tell me. Don't improvise.

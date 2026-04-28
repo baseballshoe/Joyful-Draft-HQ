@@ -229,11 +229,27 @@ def pull_fangraphs_batters(conn):
     with conn.cursor() as cur:
         cur.execute('SELECT fangraphs_id, player_id FROM player_ids WHERE fangraphs_id IS NOT NULL')
         fg_to_pid = dict(cur.fetchall())
+        # ── v1.5: name-fallback for players Chadwick hasn't mapped yet ──
+        cur.execute('SELECT id, name FROM players')
+        name_to_pid = {normalize_name(name): pid for pid, name in cur.fetchall() if name}
+    matched_by_id = 0
+    matched_by_name = 0
+    unmatched = 0
     records = []
     for _, row in df.iterrows():
         fg_id = safe_int(row.get('IDfg'))
         pid = fg_to_pid.get(fg_id)
-        if not pid: continue
+        if pid:
+            matched_by_id += 1
+        else:
+            fg_name = row.get('Name') or row.get('name') or ''
+            norm = normalize_name(fg_name)
+            pid = name_to_pid.get(norm)
+            if pid:
+                matched_by_name += 1
+            else:
+                unmatched += 1
+                continue
         records.append((
             pid, CURRENT_SEASON,
             safe_int(row.get('G')), safe_int(row.get('AB')), safe_int(row.get('PA')),
@@ -252,6 +268,7 @@ def pull_fangraphs_batters(conn):
             safe_float(row.get('Spd')),
             'fangraphs',
         ))
+    log.info(f'  FG batter matches: {matched_by_id} by ID, {matched_by_name} by name, {unmatched} unmatched')
     if not records:
         return 0
     log.info(f'  Writing {len(records)} batter rows')
@@ -282,11 +299,27 @@ def pull_fangraphs_pitchers(conn):
     with conn.cursor() as cur:
         cur.execute('SELECT fangraphs_id, player_id FROM player_ids WHERE fangraphs_id IS NOT NULL')
         fg_to_pid = dict(cur.fetchall())
+        # ── v1.5: name-fallback for players Chadwick hasn't mapped yet ──
+        cur.execute('SELECT id, name FROM players')
+        name_to_pid = {normalize_name(name): pid for pid, name in cur.fetchall() if name}
+    matched_by_id = 0
+    matched_by_name = 0
+    unmatched = 0
     records = []
     for _, row in df.iterrows():
         fg_id = safe_int(row.get('IDfg'))
         pid = fg_to_pid.get(fg_id)
-        if not pid: continue
+        if pid:
+            matched_by_id += 1
+        else:
+            fg_name = row.get('Name') or row.get('name') or ''
+            norm = normalize_name(fg_name)
+            pid = name_to_pid.get(norm)
+            if pid:
+                matched_by_name += 1
+            else:
+                unmatched += 1
+                continue
         records.append((
             pid, CURRENT_SEASON,
             safe_int(row.get('G')), safe_int(row.get('GS')),
@@ -311,6 +344,7 @@ def pull_fangraphs_pitchers(conn):
             safe_float(row.get('O-Swing%')), safe_float(row.get('Zone%')),
             'fangraphs',
         ))
+    log.info(f'  FG pitcher matches: {matched_by_id} by ID, {matched_by_name} by name, {unmatched} unmatched')
     if not records:
         return 0
     log.info(f'  Writing {len(records)} pitcher rows')

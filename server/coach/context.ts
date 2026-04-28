@@ -42,7 +42,7 @@ import type { WeekSchedule, ProbableStartsMap } from '../external/schedule';
 const CURRENT_SEASON = new Date().getFullYear();
 
 // Source priority for merging multi-source rows. Lower index = higher priority.
-const SOURCE_PRIORITY = ['mlb-stats-api', 'fangraphs', 'savant'];
+const SOURCE_PRIORITY = ['yahoo', 'mlb-stats-api', 'fangraphs', 'savant'];
 
 // ── Temporal context (v1.2) ──────────────────────────────────────────────
 

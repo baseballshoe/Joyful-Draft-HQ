@@ -149,7 +149,7 @@ async function refreshAccessToken(refreshToken: string) {
 
 // ── Authenticated fetcher ─────────────────────────────────────────────────
 
-async function yahooFetch(path: string): Promise<any> {
+export async function yahooFetch(path: string): Promise<any> {
   const tokens = await getTokens();
   if (!tokens) throw new Error('Not connected to Yahoo — please authenticate first');
 
