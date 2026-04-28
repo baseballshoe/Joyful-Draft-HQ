@@ -2,33 +2,26 @@
 // ─────────────────────────────────────────────────────────────────────
 // Build the data snapshot Coach sees on every conversation turn.
 //
-// v1.1 REFACTOR: Output split into three blocks for prompt caching.
-// v1.2 ADDITIONS:
-//   - Temporal awareness — Coach knows what day it is, where in the
-//     matchup week we are, and how many days remain
-//   - MLB schedule layer — per-team game counts injected into roster
-//     annotations ("6 GP this week, off Thu")
-//   - Two-start pitcher detection — pitchers tagged with their start
-//     count when probable pitchers data is available
-//
-// All schedule-layer functionality goes through `server/external/schedule.ts`
-// abstraction so we can swap providers at commercial launch.
+// v1.1: 3-block split for prompt caching
+// v1.2: temporal awareness + schedule layer + two-start pitcher detection
+// v1.4: multi-source row merging + comprehensive stat formatters +
+//       fixes field-name bugs (strikeoutsPitched, hitsAllowed, etc.)
 //
 // Block layout:
+//   1. staticPrefix      Coach personality + sport pack + league
+//                        header + settings. Cached.
+//   2. semiStaticBlock   Temporal context + standings + matchup +
+//                        week schedule summary. Cached; busts daily.
+//   3. volatileBlock     User's roster + available pool + waivers
+//                        + optionally other teams. NOT cached.
 //
-//   1. staticPrefix      — Coach personality + sport pack + league
-//                          header + settings. Identical across turns
-//                          within a session. Cached (first breakpoint).
-//
-//   2. semiStaticBlock   — Temporal context + standings + matchup
-//                          top-line + week schedule summary. Changes
-//                          daily (date in block) — cache busts
-//                          naturally each day. Cached (second breakpoint).
-//
-//   3. volatileBlock     — User's roster (with schedule annotations),
-//                          available player pool, tagged players,
-//                          Yahoo waivers, and OPTIONALLY other teams'
-//                          rosters. NOT cached.
+// MULTI-SOURCE MERGE (v1.4):
+//   pitcher_stats and batter_stats can have multiple rows per
+//   (player_id, season) — one per data_source ('mlb-stats-api',
+//   'fangraphs', 'savant'). We merge them column-by-column with
+//   source priority: MLB Stats API > FanGraphs > Savant for any
+//   column populated by multiple sources. NULL columns are filled
+//   in from whichever source has the value.
 // ─────────────────────────────────────────────────────────────────────
 import { db } from '../db';
 import {
@@ -48,46 +41,41 @@ import type { WeekSchedule, ProbableStartsMap } from '../external/schedule';
 
 const CURRENT_SEASON = new Date().getFullYear();
 
+// Source priority for merging multi-source rows. Lower index = higher priority.
+const SOURCE_PRIORITY = ['mlb-stats-api', 'fangraphs', 'savant'];
+
 // ── Temporal context (v1.2) ──────────────────────────────────────────────
 
 const DAY_NAMES   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 interface TemporalContext {
-  today:        Date;
-  todayStr:     string;       // "Tuesday, April 28, 2026"
-  todayIso:     string;       // "2026-04-28"
-  weekStart:    string;       // "2026-04-27" (Monday)
-  weekEnd:      string;       // "2026-05-03" (Sunday)
-  dayOfWeek:    number;       // 1=Mon ... 7=Sun
-  daysRemaining: number;      // including today
+  today:         Date;
+  todayStr:      string;
+  todayIso:      string;
+  weekStart:     string;
+  weekEnd:       string;
+  dayOfWeek:     number;
+  daysRemaining: number;
 }
 
-function pad2(n: number): string {
-  return String(n).padStart(2, '0');
-}
-
+function pad2(n: number): string { return String(n).padStart(2, '0'); }
 function isoDate(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 function computeTemporalContext(today: Date = new Date()): TemporalContext {
-  const jsDay  = today.getDay(); // 0=Sun..6=Sat
-  const isoDay = jsDay === 0 ? 7 : jsDay; // 1=Mon..7=Sun
-
+  const jsDay  = today.getDay();
+  const isoDay = jsDay === 0 ? 7 : jsDay;
   const monday = new Date(today);
   monday.setDate(today.getDate() - (isoDay - 1));
   monday.setHours(0, 0, 0, 0);
-
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
-
   const todayStr =
     `${DAY_NAMES[today.getDay()]}, ${MONTH_NAMES[today.getMonth()]} ${today.getDate()}, ${today.getFullYear()}`;
-
   return {
-    today,
-    todayStr,
+    today, todayStr,
     todayIso:      isoDate(today),
     weekStart:     isoDate(monday),
     weekEnd:       isoDate(sunday),
@@ -96,7 +84,7 @@ function computeTemporalContext(today: Date = new Date()): TemporalContext {
   };
 }
 
-// ── Lazy-load relevance check (v1.1, unchanged) ──────────────────────────
+// ── Lazy-load relevance check (v1.1) ─────────────────────────────────────
 
 const OTHER_TEAMS_RELEVANCE = /\b(trade|trad(e|es|ing)|swap|target|stash|league.?wide|who has|other teams?|opponents?'?\s+roster|strength|weakness|where am i (weak|strong)|cover (my|the)|need help (with|in|at)|short on|deep at)\b/i;
 
@@ -105,11 +93,72 @@ function shouldIncludeOtherTeams(latestUserMessage: string | undefined): boolean
   return OTHER_TEAMS_RELEVANCE.test(latestUserMessage);
 }
 
-// ── Schedule annotation helper (v1.2) ────────────────────────────────────
+// ── Multi-source row merging (v1.4) ──────────────────────────────────────
 //
-// Appends "| 6 GP this week" or "| ⭐ 2 STARTS this week" to a player line
-// when schedule/probables data is available. Silent failure if data
-// missing — the line just doesn't get the annotation.
+// pitcher_stats / batter_stats may have multiple rows per player from
+// different data sources. We collapse to one row per player by taking
+// the highest-priority non-null value per column.
+
+function mergeStatRows<T extends { dataSource?: string | null }>(rows: T[]): T | null {
+  if (rows.length === 0) return null;
+  if (rows.length === 1) return rows[0];
+
+  const sorted = [...rows].sort((a, b) => {
+    const ai = SOURCE_PRIORITY.indexOf(a.dataSource ?? '');
+    const bi = SOURCE_PRIORITY.indexOf(b.dataSource ?? '');
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  });
+
+  const merged: any = { ...sorted[0] };
+  for (const row of sorted.slice(1)) {
+    for (const [key, value] of Object.entries(row)) {
+      if (merged[key] == null && value != null) {
+        merged[key] = value;
+      }
+    }
+  }
+  return merged as T;
+}
+
+function rowsByPlayerId<T extends { playerId: number; dataSource?: string | null }>(
+  rows: T[],
+): Map<number, T> {
+  const grouped = new Map<number, T[]>();
+  for (const r of rows) {
+    if (!grouped.has(r.playerId)) grouped.set(r.playerId, []);
+    grouped.get(r.playerId)!.push(r);
+  }
+  const merged = new Map<number, T>();
+  for (const [pid, list] of grouped) {
+    const m = mergeStatRows(list);
+    if (m) merged.set(pid, m);
+  }
+  return merged;
+}
+
+// ── Data-completeness check (v1.4) — for limited-data flagging ───────────
+//
+// Returns a one-line tag describing how much data we have for a player.
+// Coach uses this to decide whether to caveat its analysis.
+
+function batterDataCompleteness(stats: any | null): string {
+  if (!stats) return 'NO STATS';
+  const sample = stats.plateApps ?? stats.atBats ?? 0;
+  if (sample < 30)  return 'LIMITED DATA — tiny sample';
+  if (sample < 80)  return 'EARLY-SEASON DATA';
+  return '';
+}
+
+function pitcherDataCompleteness(stats: any | null): string {
+  if (!stats) return 'NO STATS';
+  const ip = stats.inningsPitched ?? 0;
+  const games = stats.games ?? 0;
+  if (ip < 10 && games < 5)    return 'LIMITED DATA — tiny sample';
+  if (ip < 30)                 return 'EARLY-SEASON DATA';
+  return '';
+}
+
+// ── Schedule annotation helper (v1.2) ────────────────────────────────────
 
 function buildScheduleAnnotation(
   player:       any,
@@ -119,133 +168,217 @@ function buildScheduleAnnotation(
   probables:    ProbableStartsMap | null,
 ): string {
   if (!weekSchedule) return '';
-
   const annotations: string[] = [];
   const team = player.team as string | null | undefined;
 
   if (team && weekSchedule.gameCountByTeam[team] !== undefined) {
-    const games = weekSchedule.gameCountByTeam[team];
-    annotations.push(`${games} GP this week`);
+    annotations.push(`${weekSchedule.gameCountByTeam[team]} GP this wk`);
   }
-
   if (isPitcher && probables && status?.mlbamId) {
     const starts = probables.startCountByPlayerId[String(status.mlbamId)];
     if (starts !== undefined && starts >= 2) {
-      annotations.push(`⭐ ${starts} STARTS this week`);
+      annotations.push(`⭐ ${starts} STARTS this wk`);
     } else if (starts === 1) {
       annotations.push('1 start scheduled');
     }
   }
-
   return annotations.length ? ` | ${annotations.join(', ')}` : '';
 }
 
-// ── Stat formatters (now schedule-aware) ─────────────────────────────────
+// ── Comprehensive batter line formatter (v1.4 expansion) ─────────────────
+//
+// Includes EVERY useful column from batter_stats. Multi-line for
+// readability. Schema-correct field names (no v1.2 bugs).
 
-async function formatBatterLine(
+function formatBatterLine(
   p:            any,
   stats:        any | null,
   status:       any | null,
   weekSchedule: WeekSchedule | null,
-): Promise<string> {
-  const parts: string[] = [`**${p.name}** (${p.posDisplay}, ${p.team ?? '?'})`];
+): string {
+  const head = `**${p.name}** (${p.posDisplay}, ${p.team ?? '?'})`;
+  const headParts: string[] = [head];
 
   if (status?.injuryStatus) {
-    parts.push(`🏥 ${status.injuryStatus}${status.injuryNotes ? ` — ${status.injuryNotes}` : ''}`);
+    headParts.push(`🏥 ${status.injuryStatus}${status.injuryNotes ? ` — ${status.injuryNotes}` : ''}`);
   }
   if (status?.currentTeam && status.currentTeam !== p.team) {
-    parts.push(`current team: ${status.currentTeam}`);
-  }
-  if (!stats) {
-    parts.push('(no current stats)');
-    const annot = buildScheduleAnnotation(p, false, status, weekSchedule, null);
-    return '- ' + parts.join(' | ') + annot;
+    headParts.push(`team: ${status.currentTeam}`);
   }
 
-  const sample: string[] = [];
-  if (stats.games)     sample.push(`${stats.games}G`);
-  if (stats.plateApps) sample.push(`${stats.plateApps}PA`);
-  if (sample.length) parts.push(sample.join(' '));
-
-  const counting: string[] = [];
-  if (stats.homeRuns != null)    counting.push(`${stats.homeRuns} HR`);
-  if (stats.runs != null)        counting.push(`${stats.runs} R`);
-  if (stats.rbi != null)         counting.push(`${stats.rbi} RBI`);
-  if (stats.stolenBases != null) counting.push(`${stats.stolenBases} SB`);
-  if (counting.length) parts.push(counting.join('/'));
-
-  const rate: string[] = [];
-  if (stats.avg  != null) rate.push(`${stats.avg.toFixed(3)} AVG`);
-  if (stats.obp  != null) rate.push(`${stats.obp.toFixed(3)} OBP`);
-  if (stats.slg  != null) rate.push(`${stats.slg.toFixed(3)} SLG`);
-  if (stats.iso  != null) rate.push(`${stats.iso.toFixed(3)} ISO`);
-  if (stats.kPct != null) rate.push(`${(stats.kPct * 100).toFixed(1)}% K`);
-  if (stats.bbPct != null) rate.push(`${(stats.bbPct * 100).toFixed(1)}% BB`);
-  if (rate.length) parts.push(rate.join(', '));
-
-  const adv: string[] = [];
-  if (stats.xwoba != null)       adv.push(`${stats.xwoba.toFixed(3)} xwOBA`);
-  if (stats.xba != null)         adv.push(`${stats.xba.toFixed(3)} xBA`);
-  if (stats.barrelPct != null)   adv.push(`${(stats.barrelPct * 100).toFixed(1)}% Brl`);
-  if (stats.hardHitPct != null)  adv.push(`${(stats.hardHitPct * 100).toFixed(1)}% HH`);
-  if (stats.sweetSpotPct != null) adv.push(`${(stats.sweetSpotPct * 100).toFixed(1)}% SwSp`);
-  if (stats.sprintSpeed != null) adv.push(`${stats.sprintSpeed.toFixed(1)} ft/s`);
-  if (adv.length) parts.push(`adv: ${adv.join(', ')}`);
-
+  const completeness = batterDataCompleteness(stats);
   const annot = buildScheduleAnnotation(p, false, status, weekSchedule, null);
-  return '- ' + parts.join(' | ') + annot;
+
+  if (!stats) {
+    headParts.push('(no stats yet)');
+    return '- ' + headParts.join(' | ') + annot;
+  }
+
+  // Top line: identity + key season summary
+  const summary: string[] = [];
+  if (stats.games != null)     summary.push(`${stats.games}G`);
+  if (stats.plateApps != null) summary.push(`${stats.plateApps}PA`);
+  if (stats.atBats != null)    summary.push(`${stats.atBats}AB`);
+  if (stats.avg != null)  summary.push(`${stats.avg.toFixed(3)} AVG`);
+  if (stats.obp != null)  summary.push(`${stats.obp.toFixed(3)} OBP`);
+  if (stats.slg != null)  summary.push(`${stats.slg.toFixed(3)} SLG`);
+  if (stats.ops != null)  summary.push(`${stats.ops.toFixed(3)} OPS`);
+  if (summary.length) headParts.push(summary.join(' '));
+
+  if (completeness) headParts.push(completeness);
+
+  const lines: string[] = ['- ' + headParts.join(' | ') + annot];
+
+  // Counting stats (one line)
+  const counting: string[] = [];
+  if (stats.hits != null)        counting.push(`${stats.hits}H`);
+  if (stats.doubles != null)     counting.push(`${stats.doubles}2B`);
+  if (stats.triples != null)     counting.push(`${stats.triples}3B`);
+  if (stats.homeRuns != null)    counting.push(`${stats.homeRuns}HR`);
+  if (stats.runs != null)        counting.push(`${stats.runs}R`);
+  if (stats.rbi != null)         counting.push(`${stats.rbi}RBI`);
+  if (stats.stolenBases != null) counting.push(`${stats.stolenBases}SB`);
+  if (stats.caughtStealing != null && stats.caughtStealing > 0) counting.push(`${stats.caughtStealing}CS`);
+  if (stats.walks != null)       counting.push(`${stats.walks}BB`);
+  if (stats.strikeouts != null)  counting.push(`${stats.strikeouts}K`);
+  if (counting.length) lines.push(`  · ${counting.join(' / ')}`);
+
+  // Sabermetric / advanced rate stats
+  const sabermetric: string[] = [];
+  if (stats.iso != null)     sabermetric.push(`${stats.iso.toFixed(3)} ISO`);
+  if (stats.babip != null)   sabermetric.push(`${stats.babip.toFixed(3)} BABIP`);
+  if (stats.wOBA != null)    sabermetric.push(`${stats.wOBA.toFixed(3)} wOBA`);
+  if (stats.wRCplus != null) sabermetric.push(`${Math.round(stats.wRCplus)} wRC+`);
+  if (sabermetric.length) lines.push(`  · ${sabermetric.join(', ')}`);
+
+  // Statcast quality of contact
+  const contact: string[] = [];
+  if (stats.xBA != null)            contact.push(`${stats.xBA.toFixed(3)} xBA`);
+  if (stats.xSLG != null)           contact.push(`${stats.xSLG.toFixed(3)} xSLG`);
+  if (stats.xwOBA != null)          contact.push(`${stats.xwOBA.toFixed(3)} xwOBA`);
+  if (stats.barrelPct != null)      contact.push(`${(stats.barrelPct * 100).toFixed(1)}% Brl`);
+  if (stats.hardHitPct != null)     contact.push(`${(stats.hardHitPct * 100).toFixed(1)}% HH`);
+  if (stats.avgExitVelo != null)    contact.push(`${stats.avgExitVelo.toFixed(1)} mph EV`);
+  if (stats.maxExitVelo != null)    contact.push(`max ${stats.maxExitVelo.toFixed(1)}`);
+  if (stats.avgLaunchAngle != null) contact.push(`${stats.avgLaunchAngle.toFixed(1)}° LA`);
+  if (contact.length) lines.push(`  · contact: ${contact.join(', ')}`);
+
+  // Plate discipline
+  const discipline: string[] = [];
+  if (stats.chasePct != null)        discipline.push(`${(stats.chasePct * 100).toFixed(1)}% chase`);
+  if (stats.whiffPct != null)        discipline.push(`${(stats.whiffPct * 100).toFixed(1)}% whiff`);
+  if (stats.contactPct != null)      discipline.push(`${(stats.contactPct * 100).toFixed(1)}% contact`);
+  if (stats.zoneContactPct != null)  discipline.push(`${(stats.zoneContactPct * 100).toFixed(1)}% z-contact`);
+  if (discipline.length) lines.push(`  · discipline: ${discipline.join(', ')}`);
+
+  // Speed
+  if (stats.sprintSpeed != null) {
+    lines.push(`  · ${stats.sprintSpeed.toFixed(1)} ft/s sprint`);
+  }
+
+  return lines.join('\n');
 }
 
-async function formatPitcherLine(
+// ── Comprehensive pitcher line formatter (v1.4 expansion + bugfixes) ─────
+//
+// FIXES BUG: v1.2 referenced stats.strikeouts (wrong — schema uses
+// strikeoutsPitched). Same for stats.hits → hitsAllowed, etc. As a
+// result every pitcher counting stat was silently NULL in Coach's view.
+
+function formatPitcherLine(
   p:            any,
   stats:        any | null,
   status:       any | null,
   weekSchedule: WeekSchedule | null,
   probables:    ProbableStartsMap | null,
-): Promise<string> {
-  const parts: string[] = [`**${p.name}** (${p.posDisplay}, ${p.team ?? '?'})`];
+): string {
+  const head = `**${p.name}** (${p.posDisplay}, ${p.team ?? '?'})`;
+  const headParts: string[] = [head];
 
   if (status?.injuryStatus) {
-    parts.push(`🏥 ${status.injuryStatus}${status.injuryNotes ? ` — ${status.injuryNotes}` : ''}`);
+    headParts.push(`🏥 ${status.injuryStatus}${status.injuryNotes ? ` — ${status.injuryNotes}` : ''}`);
   }
-  if (!stats) {
-    parts.push('(no current stats)');
-    const annot = buildScheduleAnnotation(p, true, status, weekSchedule, probables);
-    return '- ' + parts.join(' | ') + annot;
+  if (status?.currentTeam && status.currentTeam !== p.team) {
+    headParts.push(`team: ${status.currentTeam}`);
   }
 
-  const sample: string[] = [];
-  if (stats.games)         sample.push(`${stats.games}G`);
-  if (stats.gamesStarted)  sample.push(`${stats.gamesStarted}GS`);
-  if (stats.inningsPitched) sample.push(`${stats.inningsPitched.toFixed(1)} IP`);
-  if (sample.length) parts.push(sample.join(' '));
-
-  const counting: string[] = [];
-  if (stats.wins != null)         counting.push(`${stats.wins}W`);
-  if (stats.qualityStarts != null) counting.push(`${stats.qualityStarts}QS`);
-  if (stats.saves != null)        counting.push(`${stats.saves}SV`);
-  if (stats.strikeouts != null)   counting.push(`${stats.strikeouts}K`);
-  if (counting.length) parts.push(counting.join('/'));
-
-  const rate: string[] = [];
-  if (stats.era != null)  rate.push(`${stats.era.toFixed(2)} ERA`);
-  if (stats.whip != null) rate.push(`${stats.whip.toFixed(2)} WHIP`);
-  if (stats.kPer9 != null) rate.push(`${stats.kPer9.toFixed(1)} K/9`);
-  if (stats.bbPer9 != null) rate.push(`${stats.bbPer9.toFixed(1)} BB/9`);
-  if (rate.length) parts.push(rate.join(', '));
-
-  const adv: string[] = [];
-  if (stats.xERA != null)  adv.push(`${stats.xERA.toFixed(2)} xERA`);
-  if (stats.fip != null)   adv.push(`${stats.fip.toFixed(2)} FIP`);
-  if (stats.siera != null) adv.push(`${stats.siera.toFixed(2)} SIERA`);
-  if (stats.cswPct != null) adv.push(`${(stats.cswPct * 100).toFixed(1)}% CSW`);
-  if (stats.swStrikePct != null) adv.push(`${(stats.swStrikePct * 100).toFixed(1)}% SwStr`);
-  if (stats.avgFastballVelo != null) adv.push(`${stats.avgFastballVelo.toFixed(1)} mph FB`);
-  if (stats.spinRate != null) adv.push(`${Math.round(stats.spinRate)} spin`);
-  if (adv.length) parts.push(`adv: ${adv.join(', ')}`);
-
+  const completeness = pitcherDataCompleteness(stats);
   const annot = buildScheduleAnnotation(p, true, status, weekSchedule, probables);
-  return '- ' + parts.join(' | ') + annot;
+
+  if (!stats) {
+    headParts.push('(no stats yet)');
+    return '- ' + headParts.join(' | ') + annot;
+  }
+
+  // Top line: identity + key season summary
+  const summary: string[] = [];
+  if (stats.games != null)          summary.push(`${stats.games}G`);
+  if (stats.gamesStarted != null)   summary.push(`${stats.gamesStarted}GS`);
+  if (stats.inningsPitched != null) summary.push(`${stats.inningsPitched.toFixed(1)} IP`);
+  if (stats.era != null)            summary.push(`${stats.era.toFixed(2)} ERA`);
+  if (stats.whip != null)           summary.push(`${stats.whip.toFixed(2)} WHIP`);
+  if (summary.length) headParts.push(summary.join(' '));
+
+  if (completeness) headParts.push(completeness);
+
+  const lines: string[] = ['- ' + headParts.join(' | ') + annot];
+
+  // Counting stats (key fantasy categories)
+  const counting: string[] = [];
+  if (stats.wins != null)              counting.push(`${stats.wins}W`);
+  if (stats.losses != null)            counting.push(`${stats.losses}L`);
+  if (stats.qualityStarts != null)     counting.push(`${stats.qualityStarts}QS`);
+  if (stats.saves != null)             counting.push(`${stats.saves}SV`);
+  if (stats.holds != null && stats.holds > 0) counting.push(`${stats.holds}HLD`);
+  if (stats.strikeoutsPitched != null) counting.push(`${stats.strikeoutsPitched}K`);
+  if (stats.walksAllowed != null)      counting.push(`${stats.walksAllowed}BB`);
+  if (stats.hitsAllowed != null)       counting.push(`${stats.hitsAllowed}H`);
+  if (stats.earnedRuns != null)        counting.push(`${stats.earnedRuns}ER`);
+  if (stats.homerunsAllowed != null)   counting.push(`${stats.homerunsAllowed}HR`);
+  if (counting.length) lines.push(`  · ${counting.join(' / ')}`);
+
+  // Rate stats
+  const rate: string[] = [];
+  if (stats.kPer9 != null)    rate.push(`${stats.kPer9.toFixed(2)} K/9`);
+  if (stats.bbPer9 != null)   rate.push(`${stats.bbPer9.toFixed(2)} BB/9`);
+  if (stats.kRate != null)    rate.push(`${(stats.kRate * 100).toFixed(1)}% K`);
+  if (stats.bbRate != null)   rate.push(`${(stats.bbRate * 100).toFixed(1)}% BB`);
+  if (stats.kMinusBB != null) rate.push(`${(stats.kMinusBB * 100).toFixed(1)}% K-BB`);
+  if (rate.length) lines.push(`  · rates: ${rate.join(', ')}`);
+
+  // Sabermetrics
+  const sabermetric: string[] = [];
+  if (stats.fip != null)   sabermetric.push(`${stats.fip.toFixed(2)} FIP`);
+  if (stats.xFIP != null)  sabermetric.push(`${stats.xFIP.toFixed(2)} xFIP`);
+  if (stats.siera != null) sabermetric.push(`${stats.siera.toFixed(2)} SIERA`);
+  if (stats.xERA != null)  sabermetric.push(`${stats.xERA.toFixed(2)} xERA`);
+  if (stats.war != null)   sabermetric.push(`${stats.war.toFixed(1)} WAR`);
+  if (sabermetric.length) lines.push(`  · sabermetric: ${sabermetric.join(', ')}`);
+
+  // Pitch arsenal / stuff
+  const stuff: string[] = [];
+  if (stats.avgFastballVelo != null) stuff.push(`${stats.avgFastballVelo.toFixed(1)} mph FB`);
+  if (stats.maxFastballVelo != null) stuff.push(`max ${stats.maxFastballVelo.toFixed(1)}`);
+  if (stats.spinRate != null)        stuff.push(`${Math.round(stats.spinRate)} spin`);
+  if (stuff.length) lines.push(`  · stuff: ${stuff.join(', ')}`);
+
+  // Statcast against (key for pitchers — was missing in v1.2)
+  const against: string[] = [];
+  if (stats.xwOBAagainst != null)      against.push(`${stats.xwOBAagainst.toFixed(3)} xwOBA`);
+  if (stats.xBAagainst != null)        against.push(`${stats.xBAagainst.toFixed(3)} xBA`);
+  if (stats.barrelPctAgainst != null)  against.push(`${(stats.barrelPctAgainst * 100).toFixed(1)}% Brl`);
+  if (stats.hardHitPctAgainst != null) against.push(`${(stats.hardHitPctAgainst * 100).toFixed(1)}% HH`);
+  if (against.length) lines.push(`  · against: ${against.join(', ')}`);
+
+  // Pitch quality
+  const quality: string[] = [];
+  if (stats.cswPct != null)          quality.push(`${(stats.cswPct * 100).toFixed(1)}% CSW`);
+  if (stats.swStrikePct != null)     quality.push(`${(stats.swStrikePct * 100).toFixed(1)}% SwStr`);
+  if (stats.chasePctInduced != null) quality.push(`${(stats.chasePctInduced * 100).toFixed(1)}% chase`);
+  if (stats.zonePct != null)         quality.push(`${(stats.zonePct * 100).toFixed(1)}% zone`);
+  if (quality.length) lines.push(`  · pitch quality: ${quality.join(', ')}`);
+
+  return lines.join('\n');
 }
 
 // ── Yahoo data renderers ──────────────────────────────────────────────────
@@ -253,9 +386,7 @@ async function formatPitcherLine(
 function renderLeagueSettings(s: ParsedLeagueSettings): string {
   const battingCats = s.categories.filter(c => c.positionType === 'B').map(c => c.displayName);
   const pitchingCats = s.categories.filter(c => c.positionType === 'P').map(c => c.displayName);
-  const slots = s.rosterPositions
-    .map(rp => `${rp.position}×${rp.count}`)
-    .join(', ');
+  const slots = s.rosterPositions.map(rp => `${rp.position}×${rp.count}`).join(', ');
 
   return `## League Settings
 **${s.name}** (${s.season}) · ${s.numTeams ?? '?'} teams · ${s.scoringType ?? 'H2H Cat'}
@@ -271,37 +402,28 @@ function renderTemporalContext(t: TemporalContext): string {
     t.dayOfWeek === 1 ? 'Day 1 of 7 (just started — sample sizes mean nothing yet)' :
     t.dayOfWeek === 7 ? 'Day 7 of 7 (final day of the matchup)' :
                         `Day ${t.dayOfWeek} of 7`;
-
   const remainingNote =
     t.daysRemaining === 1 ? 'Only today left in the matchup.' :
     t.daysRemaining === 0 ? 'Matchup is in the books — we\'re looking at next week.' :
                             `${t.daysRemaining} days remaining (counting today).`;
-
   return `## TODAY
 **${t.todayStr}** (ISO ${t.todayIso})
 Matchup week: ${t.weekStart} → ${t.weekEnd} · ${dayLabel}
 ${remainingNote}`;
 }
 
-function renderScheduleSummary(
-  weekSchedule: WeekSchedule | null,
-  temporal:     TemporalContext,
-): string {
+function renderScheduleSummary(weekSchedule: WeekSchedule | null): string {
   if (!weekSchedule) return '';
-
   const counts = weekSchedule.gameCountByTeam;
   const teams  = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
-
-  const heavy:    string[] = []; // 7+ games
-  const standard: string[] = []; // 6
-  const light:    string[] = []; // <6
-
+  const heavy:    string[] = [];
+  const standard: string[] = [];
+  const light:    string[] = [];
   for (const t of teams) {
     if (counts[t] >= 7)      heavy.push(`${t} (${counts[t]})`);
     else if (counts[t] === 6) standard.push(t);
     else                      light.push(`${t} (${counts[t]})`);
   }
-
   const lines: string[] = [`## Week Schedule (${weekSchedule.startDate} → ${weekSchedule.endDate})`];
   if (heavy.length)    lines.push(`Heavy schedule (7+):  ${heavy.join(', ')}`);
   if (standard.length) lines.push(`Standard (6 games):   ${standard.join(', ')}`);
@@ -324,10 +446,8 @@ function renderStandings(st: ParsedStandings): string {
 
 function renderMatchup(sb: ParsedScoreboard, settings: ParsedLeagueSettings | null): string {
   if (!sb.matchups.length) return '';
-
   const myMatchup = sb.matchups.find(m => m.sides.some(s => s.isOwnedByCurrentLogin));
   if (!myMatchup) return '';
-
   const me  = myMatchup.sides.find(s => s.isOwnedByCurrentLogin);
   const opp = myMatchup.sides.find(s => !s.isOwnedByCurrentLogin);
   if (!me || !opp) return '';
@@ -359,7 +479,6 @@ function renderMatchup(sb: ParsedScoreboard, settings: ParsedLeagueSettings | nu
 function renderOtherTeams(allTeams: YahooTeamWithRoster[]): string {
   const others = allTeams.filter(t => !t.isOwnedByCurrentLogin);
   if (!others.length) return '';
-
   const lines: string[] = ['## Other Teams in League (rosters, no stats)'];
   for (const team of others) {
     const mgr = team.managerName ? ` · ${team.managerName}` : '';
@@ -393,21 +512,20 @@ function renderYahooWaivers(waiverB: YahooRosterPlayer[] | null, waiverP: YahooR
   return lines.join('\n\n');
 }
 
-// ── Roster section builders (DB-backed, schedule-aware) ──────────────────
+// ── Roster section builders (v1.4: multi-source merge) ───────────────────
 
 async function buildUserRosterSection(
   weekSchedule: WeekSchedule | null,
   probables:    ProbableStartsMap | null,
 ): Promise<string> {
   try {
-    const myRoster = await db
-      .select()
-      .from(players)
-      .where(eq(players.status, 'mine'));
-
+    const myRoster = await db.select().from(players).where(eq(players.status, 'mine'));
     if (myRoster.length === 0) return '';
 
     const ids = myRoster.map(p => p.id);
+
+    // v1.4: don't restrict by data_source — pull all rows for these
+    // players in the current season, then merge.
     const battersRows = await db.select().from(batterStats)
       .where(and(
         eq(batterStats.season, CURRENT_SEASON),
@@ -421,8 +539,8 @@ async function buildUserRosterSection(
     const statusRows = await db.select().from(playerStatus)
       .where(sql`${playerStatus.playerId} IN (${sql.join(ids.map(i => sql`${i}`), sql`, `)})`);
 
-    const batterByPid  = new Map(battersRows.map(r => [r.playerId, r]));
-    const pitcherByPid = new Map(pitchersRows.map(r => [r.playerId, r]));
+    const batterByPid  = rowsByPlayerId(battersRows);
+    const pitcherByPid = rowsByPlayerId(pitchersRows);
     const statusByPid  = new Map(statusRows.map(r => [r.playerId, r]));
 
     const lines: string[] = [];
@@ -431,8 +549,8 @@ async function buildUserRosterSection(
       const stats  = isPitcher ? pitcherByPid.get(p.id) : batterByPid.get(p.id);
       const status = statusByPid.get(p.id);
       lines.push(isPitcher
-        ? await formatPitcherLine(p, stats, status, weekSchedule, probables)
-        : await formatBatterLine(p, stats, status, weekSchedule));
+        ? formatPitcherLine(p, stats, status, weekSchedule, probables)
+        : formatBatterLine(p, stats, status, weekSchedule));
     }
     return `## Your Roster (full advanced stats, schedule-annotated)\n${lines.join('\n')}`;
   } catch (e) {
@@ -446,11 +564,7 @@ async function buildAvailablePoolAndTagged(
   probables:    ProbableStartsMap | null,
 ): Promise<{ pool: string; tagged: string }> {
   try {
-    const available = await db
-      .select()
-      .from(players)
-      .where(eq(players.status, 'available'));
-
+    const available = await db.select().from(players).where(eq(players.status, 'available'));
     const ids = available.map(p => p.id);
     if (ids.length === 0) return { pool: '', tagged: '' };
 
@@ -467,8 +581,8 @@ async function buildAvailablePoolAndTagged(
     const statusRows = await db.select().from(playerStatus)
       .where(sql`${playerStatus.playerId} IN (${sql.join(ids.map(i => sql`${i}`), sql`, `)})`);
 
-    const batterByPid  = new Map(battersRows.map(r => [r.playerId, r]));
-    const pitcherByPid = new Map(pitchersRows.map(r => [r.playerId, r]));
+    const batterByPid  = rowsByPlayerId(battersRows);
+    const pitcherByPid = rowsByPlayerId(pitchersRows);
     const statusByPid  = new Map(statusRows.map(r => [r.playerId, r]));
 
     let pool = '';
@@ -484,8 +598,8 @@ async function buildAvailablePoolAndTagged(
         const stats  = isPitcher ? pitcherByPid.get(p.id) : batterByPid.get(p.id);
         const status = statusByPid.get(p.id);
         lines.push(isPitcher
-          ? await formatPitcherLine(p, stats, status, weekSchedule, probables)
-          : await formatBatterLine(p, stats, status, weekSchedule));
+          ? formatPitcherLine(p, stats, status, weekSchedule, probables)
+          : formatBatterLine(p, stats, status, weekSchedule));
       }
       pool = `## Available Players With Current Data (top ${withData.length})
 These have stats and are not on rosters. Recommend adds from this pool primarily.
@@ -534,54 +648,26 @@ async function safeGetProbables(t: TemporalContext): Promise<ProbableStartsMap |
 export interface CoachContextOptions {
   userId: number;
   pageContext: string;
-  /**
-   * The latest user message — used by the lazy-load logic to decide
-   * whether to include other teams' rosters in the volatile block.
-   * Pass undefined to always exclude other teams.
-   */
   latestUserMessage?: string;
-  /**
-   * Override "today" for testing (ISO string or Date). Production code
-   * passes nothing and uses real time.
-   */
   now?: Date;
 }
 
 export interface CoachContextResult {
-  /** Sport-agnostic personality + sport pack + league header + settings.
-   *  Cacheable, identical across turns within a session. */
-  staticPrefix: string;
-
-  /** Temporal context + standings + matchup + week schedule summary.
-   *  Cacheable; cache busts naturally as date changes. */
-  semiStaticBlock: string;
-
-  /** Roster, available pool, tagged, waivers, optionally other teams.
-   *  Always fresh — NOT cached. */
-  volatileBlock: string;
-
-  /** Live league settings — used by buildBaseballPack to inject
-   *  current scoring categories into the sport pack. */
-  settings: ParsedLeagueSettings | null;
-
-  /** Whether the lazy other-teams block was included this turn. */
+  staticPrefix:       string;
+  semiStaticBlock:    string;
+  volatileBlock:      string;
+  settings:           ParsedLeagueSettings | null;
   includedOtherTeams: boolean;
-
-  /** v1.2: whether we successfully fetched MLB schedule data this turn. */
-  hadSchedule: boolean;
-
-  /** v1.2: whether we successfully fetched probable pitchers this turn. */
-  hadProbables: boolean;
+  hadSchedule:        boolean;
+  hadProbables:       boolean;
 }
 
 export async function buildCoachContext(opts: CoachContextOptions): Promise<CoachContextResult> {
-  const { userId, pageContext, latestUserMessage } = opts;
+  const { pageContext, latestUserMessage } = opts;
   const temporal = computeTemporalContext(opts.now ?? new Date());
 
-  // 1. Connected league overview
   const [leagueRow] = await db.select().from(yahooLeague).where(eq(yahooLeague.id, 1));
 
-  // 2. Pull cached Yahoo data (stale-OK; we'd rather have stale than nothing)
   const [settingsCached, standingsCached, scoreboardCached, rostersCached, waiverBCached, waiverPCached] =
     await Promise.all([
       getCachedOrNull<ParsedLeagueSettings>('settings'),
@@ -599,69 +685,48 @@ export async function buildCoachContext(opts: CoachContextOptions): Promise<Coac
   const waiverB    = waiverBCached?.data ?? null;
   const waiverP    = waiverPCached?.data ?? null;
 
-  // 2.5. v1.2: fetch MLB schedule + probables for the matchup week.
-  // Parallelized; both gracefully degrade to null on failure.
   const [weekSchedule, probables] = await Promise.all([
     safeGetWeekSchedule(temporal),
     safeGetProbables(temporal),
   ]);
 
-  // ── BLOCK 1: STATIC PREFIX (cacheable, biggest win) ─────────────────────
+  // Static prefix
   const sportPack = buildBaseballPack({ settings });
   const systemPrompt = buildCoachSystemPrompt({ sportPack, pageContext });
-
   const staticSections: string[] = [systemPrompt, '', '# CURRENT DATA SNAPSHOT'];
-
   if (leagueRow) {
     staticSections.push(`## League
 ${leagueRow.name} (${leagueRow.season}) — ${leagueRow.numTeams ?? '?'} teams, ${leagueRow.scoringType ?? 'H2H Cat'}.
 Your team: ${leagueRow.myTeamName ?? '(not connected)'}`);
   }
-
   if (settings) staticSections.push(renderLeagueSettings(settings));
-
   const staticPrefix = staticSections.join('\n\n');
 
-  // ── BLOCK 2: SEMI-STATIC (cacheable, changes daily) ────────────────────
+  // Semi-static
   const semiStaticSections: string[] = [];
-
-  // v1.2: Temporal context FIRST so Coach orients before reading live data
   semiStaticSections.push(renderTemporalContext(temporal));
-
-  // v1.2: Schedule summary (per-team game counts for the matchup week)
   if (weekSchedule) {
-    const schedSummary = renderScheduleSummary(weekSchedule, temporal);
+    const schedSummary = renderScheduleSummary(weekSchedule);
     if (schedSummary) semiStaticSections.push(schedSummary);
   }
-
   if (scoreboard) {
     const matchupBlock = renderMatchup(scoreboard, settings);
     if (matchupBlock) semiStaticSections.push(matchupBlock);
   }
-
   if (standings) semiStaticSections.push(renderStandings(standings));
-
   const semiStaticBlock = semiStaticSections.join('\n\n') || '(no live standings/matchup yet)';
 
-  // ── BLOCK 3: VOLATILE (always fresh) ───────────────────────────────────
+  // Volatile
   const volatileSections: string[] = [];
-
-  // 3a. User's roster — DEEP stats + schedule annotations (v1.2)
   const rosterSection = await buildUserRosterSection(weekSchedule, probables);
   if (rosterSection) volatileSections.push(rosterSection);
-
-  // 3b. Available pool + tagged (also schedule-annotated)
   const { pool, tagged } = await buildAvailablePoolAndTagged(weekSchedule, probables);
   if (pool)    volatileSections.push(pool);
   if (tagged)  volatileSections.push(tagged);
-
-  // 3c. Real Yahoo waiver wire (fresh roster status from Yahoo)
   const waiverBlock = renderYahooWaivers(waiverB, waiverP);
   if (waiverBlock) volatileSections.push(waiverBlock);
 
-  // 3d. Other teams — LAZY-LOADED only when relevance detected
-  const includedOtherTeams =
-    rosters !== null && shouldIncludeOtherTeams(latestUserMessage);
+  const includedOtherTeams = rosters !== null && shouldIncludeOtherTeams(latestUserMessage);
   if (includedOtherTeams) {
     const otherBlock = renderOtherTeams(rosters!);
     if (otherBlock) volatileSections.push(otherBlock);
