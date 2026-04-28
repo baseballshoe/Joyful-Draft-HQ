@@ -228,3 +228,36 @@ export const pitcherStats = pgTable("pitcher_stats", {
 export type PlayerIds    = typeof playerIds.$inferSelect;
 export type BatterStats  = typeof batterStats.$inferSelect;
 export type PitcherStats = typeof pitcherStats.$inferSelect;
+
+// ── AI Conversations (chat history) ─────────────────────────────────────
+export const aiConversations = pgTable("ai_conversations", {
+  id:          serial("id").primaryKey(),
+  userId:      integer("user_id").default(1),
+  sessionId:   text("session_id").notNull(),
+  role:        text("role").notNull(),
+  content:     text("content").notNull(),
+  pageContext: text("page_context"),
+  modelUsed:   text("model_used"),
+  tokensIn:    integer("tokens_in"),
+  tokensOut:   integer("tokens_out"),
+  createdAt:   timestamp("created_at").defaultNow(),
+});
+
+// ── AI Usage Tracking (privacy-safe metadata) ───────────────────────────
+export const aiUsage = pgTable("ai_usage", {
+  id:           serial("id").primaryKey(),
+  userId:       integer("user_id").default(1),
+  sessionId:    text("session_id"),
+  pageContext:  text("page_context"),
+  modelUsed:    text("model_used"),
+  tokensIn:     integer("tokens_in").default(0),
+  tokensOut:    integer("tokens_out").default(0),
+  costEstimate: real("cost_estimate"),
+  responseMs:   integer("response_ms"),
+  success:      boolean("success").default(true),
+  errorType:    text("error_type"),
+  createdAt:    timestamp("created_at").defaultNow(),
+});
+
+export type AiConversation = typeof aiConversations.$inferSelect;
+export type AiUsage         = typeof aiUsage.$inferSelect;

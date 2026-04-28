@@ -15,6 +15,7 @@ Key features:
 - Smart roster slot auto-assignment when drafting (primary pos → Util → P overflow → BN)
 - Dashboard shows 4 rounds (prev, current, +1, +2); round overrides sort by rank within round
 - `rosterSlot` field tracked per player; displayed on My Roster page with SlotBadge
+- AI assistant (Claude via Anthropic SDK) — floating sidebar on dashboard, streaming SSE responses, conversation history per session, usage tracking. Requires `ANTHROPIC_API_KEY` secret.
 
 ## User Preferences
 

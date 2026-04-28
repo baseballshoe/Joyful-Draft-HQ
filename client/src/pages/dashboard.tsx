@@ -2,6 +2,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react
 import { api } from '@/lib/api';
 import { PosBadge, TagPill, ActionBtns, Card } from '@/components/game-ui';
 import { useDraftState } from '@/hooks/use-draft';
+import AskAI from '@/components/ask-ai';
 
 // ── Stat chip ─────────────────────────────────────────────────────────────
 function StatChip({ label, value, color, bg }: { label: string; value: any; color: string; bg: string }) {
@@ -575,6 +576,7 @@ export default function Dashboard() {
         </div>
 
       </div>
+      <AskAI pageContext="dashboard" />
     </div>
   );
 }

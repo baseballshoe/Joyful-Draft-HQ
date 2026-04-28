@@ -7,9 +7,10 @@ import { WebSocketServer, WebSocket } from "ws";
 import multer from "multer";
 import { parseFPBuffer, parseESPNBuffer, parseYahooBuffer, type ESPNParseResult } from "./import-service";
 import * as yahoo from './yahoo';
-import { yahooLeague, type UpdatePlayerRequest } from '@shared/schema';
+import * as ai from './ai';
+import { yahooLeague, aiConversations, type UpdatePlayerRequest } from '@shared/schema';
 import { db } from './db';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 // Seed function to populate some initial players if empty
 async function seedDatabase() {
@@ -599,6 +600,123 @@ export async function registerRoutes(
       res.json(scoreboard);
     } catch (err: any) {
       res.status(400).json({ message: err.message });
+    }
+  });
+
+  // ── AI: streaming chat endpoint (Server-Sent Events) ────────────────────
+  app.post('/api/ai/ask', async (req, res) => {
+    const { sessionId, question, pageContext, contextData } = req.body;
+
+    if (!sessionId || !question || !pageContext) {
+      return res.status(400).json({
+        message: 'sessionId, question, and pageContext are required',
+      });
+    }
+
+    const userId = 1;
+
+    res.writeHead(200, {
+      'Content-Type':       'text/event-stream',
+      'Cache-Control':      'no-cache',
+      'Connection':         'keep-alive',
+      'X-Accel-Buffering':  'no',
+    });
+
+    const send = (data: any) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      for await (const chunk of ai.askAIStream({
+        userId,
+        sessionId,
+        question,
+        pageContext,
+        contextData,
+      })) {
+        send(chunk);
+        if (chunk.type === 'done' || chunk.type === 'error') break;
+      }
+    } catch (err: any) {
+      console.error('AI route error:', err);
+      send({ type: 'error', content: err.message ?? 'Server error' });
+    } finally {
+      res.end();
+    }
+  });
+
+  // ── AI: get conversation history for a session ──────────────────────────
+  app.get('/api/ai/history', async (req, res) => {
+    const sessionId = req.query.sessionId as string;
+    if (!sessionId) {
+      return res.status(400).json({ message: 'sessionId required' });
+    }
+
+    const userId = 1;
+
+    try {
+      const history = await ai.getConversationHistory(userId, sessionId);
+      res.json(history.map(h => ({
+        id:        h.id,
+        role:      h.role,
+        content:   h.content,
+        createdAt: h.createdAt,
+      })));
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── AI: clear session (start a new chat) ─────────────────────────────────
+  app.delete('/api/ai/session', async (req, res) => {
+    const sessionId = req.query.sessionId as string;
+    if (!sessionId) {
+      return res.status(400).json({ message: 'sessionId required' });
+    }
+
+    const userId = 1;
+
+    try {
+      await ai.clearSession(userId, sessionId);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── AI: get suggested prompts for a page ────────────────────────────────
+  app.get('/api/ai/suggestions', (req, res) => {
+    const pageContext = (req.query.pageContext as string) ?? 'dashboard';
+    const prompts = ai.getSuggestedPrompts(pageContext);
+    res.json({ pageContext, prompts });
+  });
+
+  // ── AI: get usage stats ──────────────────────────────────────────────────
+  app.get('/api/ai/usage', async (_req, res) => {
+    const userId = 1;
+
+    try {
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+      const recent = await db
+        .select()
+        .from(aiConversations)
+        .where(and(
+          eq(aiConversations.userId, userId),
+          eq(aiConversations.role, 'user'),
+        ));
+
+      const recentInWindow = recent.filter(r =>
+        r.createdAt && new Date(r.createdAt) > oneWeekAgo
+      );
+
+      res.json({
+        questionsThisWeek: recentInWindow.length,
+        questionsAllTime:  recent.length,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
     }
   });
 
