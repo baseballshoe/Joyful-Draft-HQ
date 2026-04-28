@@ -2,34 +2,33 @@
 // ─────────────────────────────────────────────────────────────────────
 // Build the data snapshot Coach sees on every conversation turn.
 //
-// v1.1 REFACTOR: The output is now split into THREE blocks for prompt
-// caching:
+// v1.1 REFACTOR: Output split into three blocks for prompt caching.
+// v1.2 ADDITIONS:
+//   - Temporal awareness — Coach knows what day it is, where in the
+//     matchup week we are, and how many days remain
+//   - MLB schedule layer — per-team game counts injected into roster
+//     annotations ("6 GP this week, off Thu")
+//   - Two-start pitcher detection — pitchers tagged with their start
+//     count when probable pitchers data is available
+//
+// All schedule-layer functionality goes through `server/external/schedule.ts`
+// abstraction so we can swap providers at commercial launch.
+//
+// Block layout:
 //
 //   1. staticPrefix      — Coach personality + sport pack + league
 //                          header + settings. Identical across turns
 //                          within a session. Cached (first breakpoint).
 //
-//   2. semiStaticBlock   — Standings + matchup top-line. Changes
-//                          rarely (every ~30 min as Yahoo cache
-//                          refreshes). Cached (second breakpoint).
+//   2. semiStaticBlock   — Temporal context + standings + matchup
+//                          top-line + week schedule summary. Changes
+//                          daily (date in block) — cache busts
+//                          naturally each day. Cached (second breakpoint).
 //
-//   3. volatileBlock     — User's roster (full advanced stats),
+//   3. volatileBlock     — User's roster (with schedule annotations),
 //                          available player pool, tagged players,
 //                          Yahoo waivers, and OPTIONALLY other teams'
-//                          rosters. NOT cached — fresh every turn.
-//
-// Other teams' rosters are now LAZY-LOADED: only included when the
-// user's question hints at trades / league-wide / "who has X" /
-// strength-weakness analysis. Saves ~1-2K tokens on most turns.
-//
-// Ordering of detail (most → least):
-//   1. User's roster — full advanced stats per player
-//   2. Available player pool with stats — addable candidates
-//   3. Current matchup — categories scoreline this week
-//   4. Standings — full league context
-//   5. Other 11 teams' rosters — names + positions only (lazy)
-//   6. League settings — categories, roster construction
-//   7. User-tagged players (their notes from cheat sheet)
+//                          rosters. NOT cached.
 // ─────────────────────────────────────────────────────────────────────
 import { db } from '../db';
 import {
@@ -44,15 +43,60 @@ import type {
 } from '../yahoo';
 import { buildCoachSystemPrompt } from './personality';
 import { buildBaseballPack } from './baseball';
+import { scheduleProvider } from '../external/schedule';
+import type { WeekSchedule, ProbableStartsMap } from '../external/schedule';
 
 const CURRENT_SEASON = new Date().getFullYear();
 
-// ── Lazy-load relevance check ─────────────────────────────────────────────
-//
-// Other teams' rosters add ~1-2K tokens. They're only relevant when the
-// user is asking about trades, league-wide context, or who has whom.
-// For everyday "should I drop X" or "who's hot on waivers" questions,
-// they're noise. Skip them by default; include only when we see signal.
+// ── Temporal context (v1.2) ──────────────────────────────────────────────
+
+const DAY_NAMES   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+interface TemporalContext {
+  today:        Date;
+  todayStr:     string;       // "Tuesday, April 28, 2026"
+  todayIso:     string;       // "2026-04-28"
+  weekStart:    string;       // "2026-04-27" (Monday)
+  weekEnd:      string;       // "2026-05-03" (Sunday)
+  dayOfWeek:    number;       // 1=Mon ... 7=Sun
+  daysRemaining: number;      // including today
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function isoDate(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function computeTemporalContext(today: Date = new Date()): TemporalContext {
+  const jsDay  = today.getDay(); // 0=Sun..6=Sat
+  const isoDay = jsDay === 0 ? 7 : jsDay; // 1=Mon..7=Sun
+
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (isoDay - 1));
+  monday.setHours(0, 0, 0, 0);
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+
+  const todayStr =
+    `${DAY_NAMES[today.getDay()]}, ${MONTH_NAMES[today.getMonth()]} ${today.getDate()}, ${today.getFullYear()}`;
+
+  return {
+    today,
+    todayStr,
+    todayIso:      isoDate(today),
+    weekStart:     isoDate(monday),
+    weekEnd:       isoDate(sunday),
+    dayOfWeek:     isoDay,
+    daysRemaining: 8 - isoDay,
+  };
+}
+
+// ── Lazy-load relevance check (v1.1, unchanged) ──────────────────────────
 
 const OTHER_TEAMS_RELEVANCE = /\b(trade|trad(e|es|ing)|swap|target|stash|league.?wide|who has|other teams?|opponents?'?\s+roster|strength|weakness|where am i (weak|strong)|cover (my|the)|need help (with|in|at)|short on|deep at)\b/i;
 
@@ -61,9 +105,49 @@ function shouldIncludeOtherTeams(latestUserMessage: string | undefined): boolean
   return OTHER_TEAMS_RELEVANCE.test(latestUserMessage);
 }
 
-// ── Stat formatters (unchanged from v1.0) ─────────────────────────────────
+// ── Schedule annotation helper (v1.2) ────────────────────────────────────
+//
+// Appends "| 6 GP this week" or "| ⭐ 2 STARTS this week" to a player line
+// when schedule/probables data is available. Silent failure if data
+// missing — the line just doesn't get the annotation.
 
-async function formatBatterLine(p: any, stats: any | null, status: any | null): Promise<string> {
+function buildScheduleAnnotation(
+  player:       any,
+  isPitcher:    boolean,
+  status:       any,
+  weekSchedule: WeekSchedule | null,
+  probables:    ProbableStartsMap | null,
+): string {
+  if (!weekSchedule) return '';
+
+  const annotations: string[] = [];
+  const team = player.team as string | null | undefined;
+
+  if (team && weekSchedule.gameCountByTeam[team] !== undefined) {
+    const games = weekSchedule.gameCountByTeam[team];
+    annotations.push(`${games} GP this week`);
+  }
+
+  if (isPitcher && probables && status?.mlbamId) {
+    const starts = probables.startCountByPlayerId[String(status.mlbamId)];
+    if (starts !== undefined && starts >= 2) {
+      annotations.push(`⭐ ${starts} STARTS this week`);
+    } else if (starts === 1) {
+      annotations.push('1 start scheduled');
+    }
+  }
+
+  return annotations.length ? ` | ${annotations.join(', ')}` : '';
+}
+
+// ── Stat formatters (now schedule-aware) ─────────────────────────────────
+
+async function formatBatterLine(
+  p:            any,
+  stats:        any | null,
+  status:       any | null,
+  weekSchedule: WeekSchedule | null,
+): Promise<string> {
   const parts: string[] = [`**${p.name}** (${p.posDisplay}, ${p.team ?? '?'})`];
 
   if (status?.injuryStatus) {
@@ -74,7 +158,8 @@ async function formatBatterLine(p: any, stats: any | null, status: any | null): 
   }
   if (!stats) {
     parts.push('(no current stats)');
-    return '- ' + parts.join(' | ');
+    const annot = buildScheduleAnnotation(p, false, status, weekSchedule, null);
+    return '- ' + parts.join(' | ') + annot;
   }
 
   const sample: string[] = [];
@@ -107,10 +192,17 @@ async function formatBatterLine(p: any, stats: any | null, status: any | null): 
   if (stats.sprintSpeed != null) adv.push(`${stats.sprintSpeed.toFixed(1)} ft/s`);
   if (adv.length) parts.push(`adv: ${adv.join(', ')}`);
 
-  return '- ' + parts.join(' | ');
+  const annot = buildScheduleAnnotation(p, false, status, weekSchedule, null);
+  return '- ' + parts.join(' | ') + annot;
 }
 
-async function formatPitcherLine(p: any, stats: any | null, status: any | null): Promise<string> {
+async function formatPitcherLine(
+  p:            any,
+  stats:        any | null,
+  status:       any | null,
+  weekSchedule: WeekSchedule | null,
+  probables:    ProbableStartsMap | null,
+): Promise<string> {
   const parts: string[] = [`**${p.name}** (${p.posDisplay}, ${p.team ?? '?'})`];
 
   if (status?.injuryStatus) {
@@ -118,7 +210,8 @@ async function formatPitcherLine(p: any, stats: any | null, status: any | null):
   }
   if (!stats) {
     parts.push('(no current stats)');
-    return '- ' + parts.join(' | ');
+    const annot = buildScheduleAnnotation(p, true, status, weekSchedule, probables);
+    return '- ' + parts.join(' | ') + annot;
   }
 
   const sample: string[] = [];
@@ -151,7 +244,8 @@ async function formatPitcherLine(p: any, stats: any | null, status: any | null):
   if (stats.spinRate != null) adv.push(`${Math.round(stats.spinRate)} spin`);
   if (adv.length) parts.push(`adv: ${adv.join(', ')}`);
 
-  return '- ' + parts.join(' | ');
+  const annot = buildScheduleAnnotation(p, true, status, weekSchedule, probables);
+  return '- ' + parts.join(' | ') + annot;
 }
 
 // ── Yahoo data renderers ──────────────────────────────────────────────────
@@ -170,6 +264,49 @@ ${s.currentWeek ? `Current week: ${s.currentWeek} (${s.startWeek}–${s.endWeek}
 Batting categories:  ${battingCats.join(', ') || '(none)'}
 Pitching categories: ${pitchingCats.join(', ') || '(none)'}
 Roster slots: ${slots}`;
+}
+
+function renderTemporalContext(t: TemporalContext): string {
+  const dayLabel =
+    t.dayOfWeek === 1 ? 'Day 1 of 7 (just started — sample sizes mean nothing yet)' :
+    t.dayOfWeek === 7 ? 'Day 7 of 7 (final day of the matchup)' :
+                        `Day ${t.dayOfWeek} of 7`;
+
+  const remainingNote =
+    t.daysRemaining === 1 ? 'Only today left in the matchup.' :
+    t.daysRemaining === 0 ? 'Matchup is in the books — we\'re looking at next week.' :
+                            `${t.daysRemaining} days remaining (counting today).`;
+
+  return `## TODAY
+**${t.todayStr}** (ISO ${t.todayIso})
+Matchup week: ${t.weekStart} → ${t.weekEnd} · ${dayLabel}
+${remainingNote}`;
+}
+
+function renderScheduleSummary(
+  weekSchedule: WeekSchedule | null,
+  temporal:     TemporalContext,
+): string {
+  if (!weekSchedule) return '';
+
+  const counts = weekSchedule.gameCountByTeam;
+  const teams  = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+
+  const heavy:    string[] = []; // 7+ games
+  const standard: string[] = []; // 6
+  const light:    string[] = []; // <6
+
+  for (const t of teams) {
+    if (counts[t] >= 7)      heavy.push(`${t} (${counts[t]})`);
+    else if (counts[t] === 6) standard.push(t);
+    else                      light.push(`${t} (${counts[t]})`);
+  }
+
+  const lines: string[] = [`## Week Schedule (${weekSchedule.startDate} → ${weekSchedule.endDate})`];
+  if (heavy.length)    lines.push(`Heavy schedule (7+):  ${heavy.join(', ')}`);
+  if (standard.length) lines.push(`Standard (6 games):   ${standard.join(', ')}`);
+  if (light.length)    lines.push(`Light schedule (<6):  ${light.join(', ')}`);
+  return lines.join('\n');
 }
 
 function renderStandings(st: ParsedStandings): string {
@@ -199,7 +336,6 @@ function renderMatchup(sb: ParsedScoreboard, settings: ParsedLeagueSettings | nu
   lines.push(`## This Week's Matchup (Week ${sb.week ?? '?'})`);
   lines.push(`**${me.name}** vs **${opp.name}**${myMatchup.status ? ` (${myMatchup.status})` : ''}`);
 
-  // Build per-category comparison if we have settings + stats
   if (settings) {
     const catLines: string[] = [];
     for (const cat of settings.categories) {
@@ -257,9 +393,12 @@ function renderYahooWaivers(waiverB: YahooRosterPlayer[] | null, waiverP: YahooR
   return lines.join('\n\n');
 }
 
-// ── Roster section builders (DB-backed) ───────────────────────────────────
+// ── Roster section builders (DB-backed, schedule-aware) ──────────────────
 
-async function buildUserRosterSection(): Promise<string> {
+async function buildUserRosterSection(
+  weekSchedule: WeekSchedule | null,
+  probables:    ProbableStartsMap | null,
+): Promise<string> {
   try {
     const myRoster = await db
       .select()
@@ -292,17 +431,20 @@ async function buildUserRosterSection(): Promise<string> {
       const stats  = isPitcher ? pitcherByPid.get(p.id) : batterByPid.get(p.id);
       const status = statusByPid.get(p.id);
       lines.push(isPitcher
-        ? await formatPitcherLine(p, stats, status)
-        : await formatBatterLine(p, stats, status));
+        ? await formatPitcherLine(p, stats, status, weekSchedule, probables)
+        : await formatBatterLine(p, stats, status, weekSchedule));
     }
-    return `## Your Roster (full advanced stats)\n${lines.join('\n')}`;
+    return `## Your Roster (full advanced stats, schedule-annotated)\n${lines.join('\n')}`;
   } catch (e) {
     console.error('[coach/context] Error building user roster section:', e);
     return '';
   }
 }
 
-async function buildAvailablePoolAndTagged(): Promise<{ pool: string; tagged: string }> {
+async function buildAvailablePoolAndTagged(
+  weekSchedule: WeekSchedule | null,
+  probables:    ProbableStartsMap | null,
+): Promise<{ pool: string; tagged: string }> {
   try {
     const available = await db
       .select()
@@ -342,8 +484,8 @@ async function buildAvailablePoolAndTagged(): Promise<{ pool: string; tagged: st
         const stats  = isPitcher ? pitcherByPid.get(p.id) : batterByPid.get(p.id);
         const status = statusByPid.get(p.id);
         lines.push(isPitcher
-          ? await formatPitcherLine(p, stats, status)
-          : await formatBatterLine(p, stats, status));
+          ? await formatPitcherLine(p, stats, status, weekSchedule, probables)
+          : await formatBatterLine(p, stats, status, weekSchedule));
       }
       pool = `## Available Players With Current Data (top ${withData.length})
 These have stats and are not on rosters. Recommend adds from this pool primarily.
@@ -367,6 +509,26 @@ ${lines.join('\n')}`;
   }
 }
 
+// ── Schedule fetcher (graceful failure) ──────────────────────────────────
+
+async function safeGetWeekSchedule(t: TemporalContext): Promise<WeekSchedule | null> {
+  try {
+    return await scheduleProvider.getWeekSchedule(t.weekStart, t.weekEnd);
+  } catch (e) {
+    console.error('[coach/context] schedule fetch failed (continuing without):', e);
+    return null;
+  }
+}
+
+async function safeGetProbables(t: TemporalContext): Promise<ProbableStartsMap | null> {
+  try {
+    return await scheduleProvider.getProbableStarts(t.weekStart, t.weekEnd);
+  } catch (e) {
+    console.error('[coach/context] probables fetch failed (continuing without):', e);
+    return null;
+  }
+}
+
 // ── Main entrypoint ───────────────────────────────────────────────────────
 
 export interface CoachContextOptions {
@@ -378,6 +540,11 @@ export interface CoachContextOptions {
    * Pass undefined to always exclude other teams.
    */
   latestUserMessage?: string;
+  /**
+   * Override "today" for testing (ISO string or Date). Production code
+   * passes nothing and uses real time.
+   */
+  now?: Date;
 }
 
 export interface CoachContextResult {
@@ -385,7 +552,8 @@ export interface CoachContextResult {
    *  Cacheable, identical across turns within a session. */
   staticPrefix: string;
 
-  /** Standings + matchup top-line. Cacheable, changes ~30min. */
+  /** Temporal context + standings + matchup + week schedule summary.
+   *  Cacheable; cache busts naturally as date changes. */
   semiStaticBlock: string;
 
   /** Roster, available pool, tagged, waivers, optionally other teams.
@@ -396,13 +564,19 @@ export interface CoachContextResult {
    *  current scoring categories into the sport pack. */
   settings: ParsedLeagueSettings | null;
 
-  /** Whether the lazy other-teams block was included this turn (for
-   *  telemetry / debugging). */
+  /** Whether the lazy other-teams block was included this turn. */
   includedOtherTeams: boolean;
+
+  /** v1.2: whether we successfully fetched MLB schedule data this turn. */
+  hadSchedule: boolean;
+
+  /** v1.2: whether we successfully fetched probable pitchers this turn. */
+  hadProbables: boolean;
 }
 
 export async function buildCoachContext(opts: CoachContextOptions): Promise<CoachContextResult> {
   const { userId, pageContext, latestUserMessage } = opts;
+  const temporal = computeTemporalContext(opts.now ?? new Date());
 
   // 1. Connected league overview
   const [leagueRow] = await db.select().from(yahooLeague).where(eq(yahooLeague.id, 1));
@@ -425,8 +599,14 @@ export async function buildCoachContext(opts: CoachContextOptions): Promise<Coac
   const waiverB    = waiverBCached?.data ?? null;
   const waiverP    = waiverPCached?.data ?? null;
 
+  // 2.5. v1.2: fetch MLB schedule + probables for the matchup week.
+  // Parallelized; both gracefully degrade to null on failure.
+  const [weekSchedule, probables] = await Promise.all([
+    safeGetWeekSchedule(temporal),
+    safeGetProbables(temporal),
+  ]);
+
   // ── BLOCK 1: STATIC PREFIX (cacheable, biggest win) ─────────────────────
-  // Personality + sport pack + league header + league settings.
   const sportPack = buildBaseballPack({ settings });
   const systemPrompt = buildCoachSystemPrompt({ sportPack, pageContext });
 
@@ -442,10 +622,17 @@ Your team: ${leagueRow.myTeamName ?? '(not connected)'}`);
 
   const staticPrefix = staticSections.join('\n\n');
 
-  // ── BLOCK 2: SEMI-STATIC (cacheable, changes ~30min) ───────────────────
-  // Standings + matchup top-line. These shift slowly enough during a
-  // session that caching them is a clear win.
+  // ── BLOCK 2: SEMI-STATIC (cacheable, changes daily) ────────────────────
   const semiStaticSections: string[] = [];
+
+  // v1.2: Temporal context FIRST so Coach orients before reading live data
+  semiStaticSections.push(renderTemporalContext(temporal));
+
+  // v1.2: Schedule summary (per-team game counts for the matchup week)
+  if (weekSchedule) {
+    const schedSummary = renderScheduleSummary(weekSchedule, temporal);
+    if (schedSummary) semiStaticSections.push(schedSummary);
+  }
 
   if (scoreboard) {
     const matchupBlock = renderMatchup(scoreboard, settings);
@@ -457,15 +644,14 @@ Your team: ${leagueRow.myTeamName ?? '(not connected)'}`);
   const semiStaticBlock = semiStaticSections.join('\n\n') || '(no live standings/matchup yet)';
 
   // ── BLOCK 3: VOLATILE (always fresh) ───────────────────────────────────
-  // Roster, available pool, tagged, waivers, optionally other teams.
   const volatileSections: string[] = [];
 
-  // 3a. User's roster — DEEP stats
-  const rosterSection = await buildUserRosterSection();
+  // 3a. User's roster — DEEP stats + schedule annotations (v1.2)
+  const rosterSection = await buildUserRosterSection(weekSchedule, probables);
   if (rosterSection) volatileSections.push(rosterSection);
 
-  // 3b. Available pool + tagged
-  const { pool, tagged } = await buildAvailablePoolAndTagged();
+  // 3b. Available pool + tagged (also schedule-annotated)
+  const { pool, tagged } = await buildAvailablePoolAndTagged(weekSchedule, probables);
   if (pool)    volatileSections.push(pool);
   if (tagged)  volatileSections.push(tagged);
 
@@ -490,5 +676,7 @@ Your team: ${leagueRow.myTeamName ?? '(not connected)'}`);
     volatileBlock,
     settings,
     includedOtherTeams,
+    hadSchedule:  weekSchedule !== null,
+    hadProbables: probables !== null,
   };
 }
