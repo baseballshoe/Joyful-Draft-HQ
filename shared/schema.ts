@@ -261,3 +261,30 @@ export const aiUsage = pgTable("ai_usage", {
 
 export type AiConversation = typeof aiConversations.$inferSelect;
 export type AiUsage         = typeof aiUsage.$inferSelect;
+
+// ── Player status: injuries, role, current team info ──────────────────────
+export const playerStatus = pgTable("player_status", {
+  id:             serial("id").primaryKey(),
+  playerId:       integer("player_id").notNull().unique(),
+  mlbamId:        integer("mlbam_id"),
+  isActive:       boolean("is_active").default(true),
+  injuryStatus:   text("injury_status"),
+  injuryNotes:    text("injury_notes"),
+  injuryReturnDate: text("injury_return_date"),
+  currentTeam:    text("current_team"),
+  currentLeague:  text("current_league"),
+  currentPosition: text("current_position"),
+  jerseyNumber:   text("jersey_number"),
+  battingHand:    text("batting_hand"),
+  throwingHand:   text("throwing_hand"),
+  rosterStatus:   text("roster_status"),
+  positionType:   text("position_type"),
+  birthDate:      text("birth_date"),
+  age:            integer("age"),
+  heightInches:   integer("height_inches"),
+  weightLbs:      integer("weight_lbs"),
+  dataSource:     text("data_source").default('mlb-stats-api'),
+  fetchedAt:      timestamp("fetched_at").defaultNow(),
+});
+
+export type PlayerStatus = typeof playerStatus.$inferSelect;

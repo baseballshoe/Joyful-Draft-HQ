@@ -1,23 +1,19 @@
 // client/src/components/ask-ai.tsx
 // ─────────────────────────────────
-// Reusable AI sidebar component for JOYT.
+// Reusable AI component for JOYT — v2 with:
+//  - Fixed "Ask 🤖" button order
+//  - Dashboard search bar variant that opens the same sidebar
+//  - Same engine, multiple entry points
 //
-// Drop this anywhere in the app:
-//   <AskAI pageContext="dashboard" />
+// Usage:
+//   Sidebar only (floating button):
+//     <AskAI pageContext="roster" />
 //
-// Renders:
-//  - A floating button (bottom right) that opens the AI sidebar
-//  - The sidebar itself (slides in from right when open)
-//  - Streaming response handling
-//  - Suggested prompts when the conversation is empty
-//  - "New Chat" button to clear the session
-//
-// The sidebar persists across page navigation as long as the component
-// is mounted at the layout level. Conversation is per-session.
+//   With prominent search bar (dashboard top):
+//     <AskAI pageContext="dashboard" showSearchBar />
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-// ── Types ────────────────────────────────────────────────────────────────
 interface Message {
   role:    'user' | 'assistant';
   content: string;
@@ -25,12 +21,11 @@ interface Message {
 }
 
 interface AskAIProps {
-  pageContext: string;     // 'dashboard' | 'roster' | 'waiver' | etc
-  contextData?: any;       // Optional extra context
+  pageContext:    string;
+  contextData?:   any;
+  showSearchBar?: boolean;  // If true, also renders an inline search bar
 }
 
-// Generate a session ID stored in sessionStorage so it persists across
-// page navigation but clears when the tab/window closes
 function getOrCreateSessionId(): string {
   const KEY = 'joyt_ai_session_id';
   let id = sessionStorage.getItem(KEY);
@@ -41,17 +36,17 @@ function getOrCreateSessionId(): string {
   return id;
 }
 
-export default function AskAI({ pageContext, contextData }: AskAIProps) {
+export default function AskAI({ pageContext, contextData, showSearchBar = false }: AskAIProps) {
   const [open, setOpen]               = useState(false);
   const [messages, setMessages]       = useState<Message[]>([]);
   const [input, setInput]             = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [sessionId]                   = useState(() => getOrCreateSessionId());
   const messagesEndRef                = useRef<HTMLDivElement>(null);
   const inputRef                      = useRef<HTMLTextAreaElement>(null);
 
-  // Load suggestions for current page
   useEffect(() => {
     fetch(`/api/ai/suggestions?pageContext=${pageContext}`)
       .then(r => r.json())
@@ -59,7 +54,6 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
       .catch(() => {});
   }, [pageContext]);
 
-  // Load existing conversation on mount
   useEffect(() => {
     fetch(`/api/ai/history?sessionId=${sessionId}`)
       .then(r => r.json())
@@ -75,19 +69,16 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
       .catch(() => {});
   }, [sessionId]);
 
-  // Auto-scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Focus input when sidebar opens
   useEffect(() => {
     if (open) {
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [open]);
 
-  // Cmd+K / Ctrl+K to open
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -102,7 +93,6 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  // Send a message and stream the response
   const sendMessage = useCallback(async (questionOverride?: string) => {
     const question = (questionOverride ?? input).trim();
     if (!question || isStreaming) return;
@@ -110,9 +100,7 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
     setInput('');
     setIsStreaming(true);
 
-    // Add user message immediately
     setMessages(prev => [...prev, { role: 'user', content: question }]);
-    // Add empty assistant message that we'll fill as it streams
     setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
     try {
@@ -140,8 +128,6 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-
-        // SSE format: "data: {...}\n\n"
         const lines = buffer.split('\n\n');
         buffer = lines.pop() ?? '';
 
@@ -150,15 +136,11 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
           try {
             const chunk = JSON.parse(line.slice(6));
             if (chunk.type === 'text') {
-              // Append to last (assistant) message
               setMessages(prev => {
                 const next = [...prev];
                 const last = next[next.length - 1];
                 if (last && last.role === 'assistant') {
-                  next[next.length - 1] = {
-                    ...last,
-                    content: last.content + chunk.content,
-                  };
+                  next[next.length - 1] = { ...last, content: last.content + chunk.content };
                 }
                 return next;
               });
@@ -167,10 +149,7 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
                 const next = [...prev];
                 const last = next[next.length - 1];
                 if (last && last.role === 'assistant') {
-                  next[next.length - 1] = {
-                    ...last,
-                    content: `⚠️ ${chunk.content}`,
-                  };
+                  next[next.length - 1] = { ...last, content: `⚠️ ${chunk.content}` };
                 }
                 return next;
               });
@@ -183,10 +162,7 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
         const next = [...prev];
         const last = next[next.length - 1];
         if (last && last.role === 'assistant') {
-          next[next.length - 1] = {
-            ...last,
-            content: `⚠️ ${err.message ?? 'Something went wrong'}`,
-          };
+          next[next.length - 1] = { ...last, content: `⚠️ ${err.message ?? 'Something went wrong'}` };
         }
         return next;
       });
@@ -195,7 +171,6 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
     }
   }, [input, isStreaming, sessionId, pageContext, contextData]);
 
-  // Clear session and start new chat
   const newChat = useCallback(async () => {
     if (isStreaming) return;
     setMessages([]);
@@ -211,12 +186,132 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
     }
   };
 
+  // Search bar submit — opens sidebar and sends the question
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = searchInput.trim();
+    if (!q) {
+      setOpen(true);
+      return;
+    }
+    setSearchInput('');
+    setOpen(true);
+    sendMessage(q);
+  };
+
   return (
     <>
-      {/* Floating button — bottom right */}
+      {/* Inline search bar — shows when showSearchBar=true */}
+      {showSearchBar && (
+        <div style={{
+          background: 'linear-gradient(135deg, var(--joyt-pink-light), var(--joyt-indigo-light))',
+          borderRadius: 12,
+          padding: '14px 18px',
+          margin: '8px 12px',
+          border: '1px solid var(--joyt-border)',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            marginBottom: 8,
+          }}>
+            <span style={{ fontSize: 18 }}>🤖</span>
+            <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--joyt-text)' }}>
+              Ask anything about your team
+            </span>
+            <span style={{
+              fontSize: 10,
+              color: 'var(--joyt-text-light)',
+              background: 'var(--joyt-card)',
+              padding: '2px 7px',
+              borderRadius: 4,
+              border: '1px solid var(--joyt-border)',
+              marginLeft: 'auto',
+            }}>
+              Ctrl+K
+            </span>
+          </div>
+          <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: 6 }}>
+            <input
+              type="text"
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              placeholder="Who should I draft? Should I drop someone? What's my weakness?"
+              style={{
+                flex: 1,
+                background: 'var(--joyt-card)',
+                border: '1px solid var(--joyt-border)',
+                borderRadius: 8,
+                padding: '9px 13px',
+                fontSize: 13,
+                color: 'var(--joyt-text)',
+                fontFamily: 'inherit',
+                outline: 'none',
+              }}
+              onFocus={e => e.currentTarget.style.borderColor = 'var(--joyt-pink)'}
+              onBlur={e => e.currentTarget.style.borderColor = 'var(--joyt-border)'}
+            />
+            <button
+              type="submit"
+              style={{
+                background: 'var(--joyt-pink)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '9px 18px',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              Ask
+            </button>
+          </form>
+          {suggestions.length > 0 && (
+            <div style={{
+              display: 'flex',
+              gap: 5,
+              flexWrap: 'wrap',
+              marginTop: 8,
+            }}>
+              {suggestions.slice(0, 3).map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => { setOpen(true); sendMessage(s); }}
+                  style={{
+                    background: 'var(--joyt-card)',
+                    border: '1px solid var(--joyt-border)',
+                    borderRadius: 16,
+                    padding: '4px 10px',
+                    fontSize: 11,
+                    color: 'var(--joyt-text-mid)',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                  onMouseOver={e => {
+                    e.currentTarget.style.background = 'var(--joyt-pink-light)';
+                    e.currentTarget.style.borderColor = 'var(--joyt-pink)';
+                    e.currentTarget.style.color = 'var(--joyt-pink)';
+                  }}
+                  onMouseOut={e => {
+                    e.currentTarget.style.background = 'var(--joyt-card)';
+                    e.currentTarget.style.borderColor = 'var(--joyt-border)';
+                    e.currentTarget.style.color = 'var(--joyt-text-mid)';
+                  }}
+                >
+                  💡 {s}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Floating button — bottom right (always present) */}
       <button
         onClick={() => setOpen(true)}
-        className="ask-ai-fab"
         style={{
           position: 'fixed',
           bottom: 18, right: 18, zIndex: 90,
@@ -244,23 +339,8 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
         }}
         title="Ask AI (Ctrl+K)"
       >
-        <span style={{ fontSize: 18 }}>🤖</span>
-        Ask
+        Ask <span style={{ fontSize: 18 }}>🤖</span>
       </button>
-
-      {/* Backdrop (click to close on mobile) */}
-      {open && (
-        <div
-          onClick={() => setOpen(false)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.15)',
-            zIndex: 99,
-            display: 'none',  // Only show on mobile if needed; for desktop keep transparent
-          }}
-        />
-      )}
 
       {/* Sidebar */}
       <aside
@@ -310,7 +390,6 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
                 opacity: isStreaming ? 0.5 : 1,
                 fontFamily: 'inherit',
               }}
-              title="Start a new chat"
             >
               New chat
             </button>
@@ -332,7 +411,7 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
           </button>
         </div>
 
-        {/* Messages area */}
+        {/* Messages */}
         <div style={{
           flex: 1,
           overflowY: 'auto',
@@ -345,13 +424,12 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
             <div style={{ textAlign: 'center', color: 'var(--joyt-text-mid)' }}>
               <div style={{ fontSize: 38, marginBottom: 10 }}>🤖</div>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--joyt-text)', marginBottom: 5 }}>
-                Ask me anything about your team
+                What's up — ask me anything
               </div>
               <div style={{ fontSize: 11, color: 'var(--joyt-text-light)', marginBottom: 18 }}>
-                I know your roster, your league, and your players' stats.
+                I know your roster, your league, and your players' current stats.
               </div>
 
-              {/* Suggested prompts */}
               {suggestions.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
                   <div style={{
@@ -374,7 +452,7 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
                         cursor: 'pointer',
                         color: 'var(--joyt-text)',
                         fontFamily: 'inherit',
-                        transition: 'background .15s, border-color .15s',
+                        transition: 'background .15s',
                       }}
                       onMouseOver={e => {
                         e.currentTarget.style.background = 'var(--joyt-pink-light)';
@@ -407,7 +485,7 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
                 textTransform: 'uppercase', letterSpacing: '.08em',
                 marginBottom: 3,
               }}>
-                {m.role === 'user' ? 'You' : '🤖 Ask'}
+                {m.role === 'user' ? 'You' : '🤖 Coach'}
               </div>
               <div style={{
                 background: m.role === 'user' ? 'var(--joyt-pink)' : 'var(--joyt-surface)',
@@ -431,7 +509,7 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input area */}
+        {/* Input */}
         <div style={{
           borderTop: '1px solid var(--joyt-border)',
           padding: '12px',
@@ -480,7 +558,6 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
                 cursor: input.trim() && !isStreaming ? 'pointer' : 'not-allowed',
                 fontFamily: 'inherit',
                 flexShrink: 0,
-                transition: 'background .15s',
               }}
             >
               {isStreaming ? '...' : 'Send'}
@@ -490,7 +567,7 @@ export default function AskAI({ pageContext, contextData }: AskAIProps) {
             fontSize: 9, color: 'var(--joyt-text-light)',
             textAlign: 'center', marginTop: 6,
           }}>
-            AI-generated responses · Press Enter to send · Esc to close · Ctrl+K to toggle
+            AI-generated · Press Enter to send · Esc to close · Ctrl+K to toggle
           </div>
         </div>
       </aside>

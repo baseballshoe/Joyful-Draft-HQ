@@ -402,6 +402,8 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <AskAI pageContext="dashboard" showSearchBar />
+
       {/* Main grid */}
       <div style={{
         flex: 1, overflow: 'hidden', padding: 8,
@@ -576,7 +578,6 @@ export default function Dashboard() {
         </div>
 
       </div>
-      <AskAI pageContext="dashboard" />
     </div>
   );
 }
