@@ -1,9 +1,11 @@
 // client/src/components/ask-ai.tsx
 // ─────────────────────────────────
-// Reusable AI component for JOYT — v2 with:
-//  - Fixed "Ask 🤖" button order
-//  - Dashboard search bar variant that opens the same sidebar
-//  - Same engine, multiple entry points
+// Coach — JOYT's in-app fantasy coach.
+//
+// Same engine as the prior AI sidebar; rebranded to "Coach" and the
+// welcome state, button labels, and footer copy match the new
+// personality. The component name `AskAI` is retained to avoid
+// touching every page that already imports it.
 //
 // Usage:
 //   Sidebar only (floating button):
@@ -23,11 +25,11 @@ interface Message {
 interface AskAIProps {
   pageContext:    string;
   contextData?:   any;
-  showSearchBar?: boolean;  // If true, also renders an inline search bar
+  showSearchBar?: boolean;
 }
 
 function getOrCreateSessionId(): string {
-  const KEY = 'joyt_ai_session_id';
+  const KEY = 'joyt_coach_session_id';
   let id = sessionStorage.getItem(KEY);
   if (!id) {
     id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -74,9 +76,7 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
   }, [messages]);
 
   useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
+    if (open) setTimeout(() => inputRef.current?.focus(), 100);
   }, [open]);
 
   useEffect(() => {
@@ -85,9 +85,7 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
         e.preventDefault();
         setOpen(o => !o);
       }
-      if (e.key === 'Escape' && open) {
-        setOpen(false);
-      }
+      if (e.key === 'Escape' && open) setOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -107,17 +105,10 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
       const res = await fetch('/api/ai/ask', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          sessionId,
-          question,
-          pageContext,
-          contextData,
-        }),
+        body:    JSON.stringify({ sessionId, question, pageContext, contextData }),
       });
 
-      if (!res.ok || !res.body) {
-        throw new Error('AI request failed');
-      }
+      if (!res.ok || !res.body) throw new Error('Coach request failed');
 
       const reader  = res.body.getReader();
       const decoder = new TextDecoder();
@@ -162,7 +153,7 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
         const next = [...prev];
         const last = next[next.length - 1];
         if (last && last.role === 'assistant') {
-          next[next.length - 1] = { ...last, content: `⚠️ ${err.message ?? 'Something went wrong'}` };
+          next[next.length - 1] = { ...last, content: `⚠️ ${err.message ?? 'Something went sideways'}` };
         }
         return next;
       });
@@ -186,7 +177,6 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
     }
   };
 
-  // Search bar submit — opens sidebar and sends the question
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const q = searchInput.trim();
@@ -201,7 +191,7 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
 
   return (
     <>
-      {/* Inline search bar — shows when showSearchBar=true */}
+      {/* Inline search bar — when showSearchBar=true */}
       {showSearchBar && (
         <div style={{
           background: 'linear-gradient(135deg, var(--joyt-pink-light), var(--joyt-indigo-light))',
@@ -210,23 +200,15 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
           margin: '8px 12px',
           border: '1px solid var(--joyt-border)',
         }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            marginBottom: 8,
-          }}>
-            <span style={{ fontSize: 18 }}>🤖</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <span style={{ fontSize: 18 }}>🧢</span>
             <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--joyt-text)' }}>
-              Ask anything about your team
+              Ask Coach about your team
             </span>
             <span style={{
-              fontSize: 10,
-              color: 'var(--joyt-text-light)',
-              background: 'var(--joyt-card)',
-              padding: '2px 7px',
-              borderRadius: 4,
-              border: '1px solid var(--joyt-border)',
+              fontSize: 10, color: 'var(--joyt-text-light)',
+              background: 'var(--joyt-card)', padding: '2px 7px',
+              borderRadius: 4, border: '1px solid var(--joyt-border)',
               marginLeft: 'auto',
             }}>
               Ctrl+K
@@ -237,20 +219,18 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
               type="text"
               value={searchInput}
               onChange={e => setSearchInput(e.target.value)}
-              placeholder="Who should I draft? Should I drop someone? What's my weakness?"
+              placeholder="Coach, who should I drop? Where am I weakest? What's the read this week?"
               style={{
                 flex: 1,
                 background: 'var(--joyt-card)',
                 border: '1px solid var(--joyt-border)',
                 borderRadius: 8,
-                padding: '9px 13px',
+                padding: '8px 12px',
                 fontSize: 13,
                 color: 'var(--joyt-text)',
                 fontFamily: 'inherit',
                 outline: 'none',
               }}
-              onFocus={e => e.currentTarget.style.borderColor = 'var(--joyt-pink)'}
-              onBlur={e => e.currentTarget.style.borderColor = 'var(--joyt-border)'}
             />
             <button
               type="submit"
@@ -259,9 +239,8 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
                 color: '#fff',
                 border: 'none',
                 borderRadius: 8,
-                padding: '9px 18px',
-                fontSize: 12,
-                fontWeight: 700,
+                padding: '8px 14px',
+                fontSize: 12, fontWeight: 700,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
               }}
@@ -270,12 +249,7 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
             </button>
           </form>
           {suggestions.length > 0 && (
-            <div style={{
-              display: 'flex',
-              gap: 5,
-              flexWrap: 'wrap',
-              marginTop: 8,
-            }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 9 }}>
               {suggestions.slice(0, 3).map((s, i) => (
                 <button
                   key={i}
@@ -283,7 +257,7 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
                   style={{
                     background: 'var(--joyt-card)',
                     border: '1px solid var(--joyt-border)',
-                    borderRadius: 16,
+                    borderRadius: 99,
                     padding: '4px 10px',
                     fontSize: 11,
                     color: 'var(--joyt-text-mid)',
@@ -309,7 +283,7 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
         </div>
       )}
 
-      {/* Floating button — bottom right (always present) */}
+      {/* Floating button — always present */}
       <button
         onClick={() => setOpen(true)}
         style={{
@@ -337,9 +311,9 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
           e.currentTarget.style.transform = 'translateY(0)';
           e.currentTarget.style.boxShadow = '0 6px 20px rgba(247,43,110,0.45)';
         }}
-        title="Ask AI (Ctrl+K)"
+        title="Ask Coach (Ctrl+K)"
       >
-        Ask <span style={{ fontSize: 18 }}>🤖</span>
+        Ask Coach <span style={{ fontSize: 18 }}>🧢</span>
       </button>
 
       {/* Sidebar */}
@@ -368,11 +342,13 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
           gap: 8,
           flexShrink: 0,
         }}>
-          <span style={{ fontSize: 20 }}>🤖</span>
+          <span style={{ fontSize: 20 }}>🧢</span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>Ask</div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>Coach</div>
             <div style={{ fontSize: 11, color: 'var(--joyt-text-mid)' }}>
-              {messages.length === 0 ? 'How can I help?' : `${messages.filter(m => m.role === 'user').length} question${messages.filter(m => m.role === 'user').length !== 1 ? 's' : ''} this session`}
+              {messages.length === 0
+                ? "What's on your mind?"
+                : `${messages.filter(m => m.role === 'user').length} question${messages.filter(m => m.role === 'user').length !== 1 ? 's' : ''} this session`}
             </div>
           </div>
           {messages.length > 0 && (
@@ -422,12 +398,12 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
         }}>
           {messages.length === 0 && (
             <div style={{ textAlign: 'center', color: 'var(--joyt-text-mid)' }}>
-              <div style={{ fontSize: 38, marginBottom: 10 }}>🤖</div>
+              <div style={{ fontSize: 38, marginBottom: 10 }}>🧢</div>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--joyt-text)', marginBottom: 5 }}>
-                What's up — ask me anything
+                Alright, what're we working on?
               </div>
               <div style={{ fontSize: 11, color: 'var(--joyt-text-light)', marginBottom: 18 }}>
-                I know your roster, your league, and your players' current stats.
+                I've got your roster, your league, the matchup, and the wire. Fire away.
               </div>
 
               {suggestions.length > 0 && (
@@ -485,7 +461,7 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
                 textTransform: 'uppercase', letterSpacing: '.08em',
                 marginBottom: 3,
               }}>
-                {m.role === 'user' ? 'You' : '🤖 Coach'}
+                {m.role === 'user' ? 'You' : '🧢 Coach'}
               </div>
               <div style={{
                 background: m.role === 'user' ? 'var(--joyt-pink)' : 'var(--joyt-surface)',
@@ -499,7 +475,7 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
                 wordBreak: 'break-word',
               }}>
                 {m.content || (m.role === 'assistant' && isStreaming && i === messages.length - 1
-                  ? <span style={{ opacity: .5 }}>thinking…</span>
+                  ? <span style={{ opacity: .5 }}>thinking it over…</span>
                   : ''
                 )}
               </div>
@@ -530,7 +506,7 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
               disabled={isStreaming}
-              placeholder="Ask anything about your team..."
+              placeholder="Ask Coach anything about your team..."
               rows={2}
               style={{
                 flex: 1,
@@ -567,7 +543,7 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
             fontSize: 9, color: 'var(--joyt-text-light)',
             textAlign: 'center', marginTop: 6,
           }}>
-            AI-generated · Press Enter to send · Esc to close · Ctrl+K to toggle
+            Coach is AI-generated · Enter to send · Esc to close · Ctrl+K to toggle
           </div>
         </div>
       </aside>

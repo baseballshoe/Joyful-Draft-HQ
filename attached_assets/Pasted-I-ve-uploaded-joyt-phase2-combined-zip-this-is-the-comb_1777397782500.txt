@@ -1,0 +1,88 @@
+I've uploaded joyt-phase2-combined.zip — this is the combined v1.0
+foundation + v1.1 efficiency + v1.1a telemetry pack for JOYT. It
+supersedes any previous JOYT phase-2 zip I may have shared earlier;
+this is the only one to deploy.
+
+Please follow MIGRATION_NOTES.md inside the zip exactly, in order. Do
+NOT skip steps or improvise. Critical things you must NOT miss:
+
+1. PRE-FLIGHT — confirm the new secret ADMIN_USER_IDS is set in Replit
+   Secrets before you do anything else. Set it to my numeric user ID
+   (use 1 if you can't find it elsewhere — I'm the only user). Without
+   this, the admin endpoints return 404 to everyone including me.
+
+2. SCHEMA STEP — the schema-additions.ts imports boolean, integer,
+   real, and index from drizzle-orm/pg-core. Make sure my existing
+   shared/schema.ts import line includes ALL of these before appending
+   the new tables. Then run npm run db:push and verify both yahoo_cache
+   AND coach_interactions tables exist in Postgres.
+
+3. SERVER FILES — drop in directly:
+   - server/yahoo-cache.ts (new)
+   - server/yahoo.ts (REPLACES — preserves all existing exports)
+   - server/coach/personality.ts (new, create coach/ dir)
+   - server/coach/baseball.ts (new)
+   - server/coach/context.ts (new)
+   - server/coach/categorizer.ts (new)
+   - server/coach/telemetry.ts (new)
+   - server/coach/retention.ts (new)
+   - server/middleware/admin-auth.ts (new, create middleware/ dir)
+   - server/ai.ts (REPLACES — keeps same exports, routes.ts AI routes
+     need zero changes)
+
+4. ROUTES MERGE — server/routes-phase2-additions.ts is NOT a drop-in.
+   It's a reference file. Carefully merge the route bodies into the
+   existing registerRoutes() in server/routes.ts:
+   a) Add these imports at the top:
+      import * as yahooCache from './yahoo-cache';
+      import { requireAdmin } from './middleware/admin-auth';
+      import { coachInteractions } from '@shared/schema';
+      import { gte, desc, sql } from 'drizzle-orm';
+   b) REPLACE existing handlers for /api/yahoo/standings,
+      /api/yahoo/scoreboard, and /api/yahoo/waiver-wire with the
+      cache-aware versions
+   c) ADD six new Yahoo endpoints: /settings, /rosters, /transactions,
+      /all, /cache-status, /refresh
+   d) ADD six admin endpoints (all use requireAdmin):
+      /api/admin/coach/summary, /trend, /buckets, /pages, /expensive,
+      /users
+   After merging, delete server/routes-phase2-additions.ts — it's
+   reference only.
+
+5. RETENTION SCHEDULER — in server/index.ts (or wherever the express
+   app boots), AFTER app.listen(...), add:
+      import { startRetentionScheduler } from './coach/retention';
+      startRetentionScheduler();
+   This is critical — without it, the 90-day cleanup never runs.
+
+6. CLIENT FILES — drop in directly:
+   - client/src/hooks/use-yahoo-data.ts (new)
+   - client/src/components/ask-ai.tsx (REPLACES — full Coach rebrand)
+
+7. BREAKING CHANGE CHECK — standings, scoreboard, and waiver-wire
+   endpoints now return {data, meta} envelopes. Grep client/src for
+   useQuery calls hitting these endpoints and update them to read
+   response.data instead of response. The new use-yahoo-data.ts hooks
+   already handle this correctly.
+
+8. SMOKE TESTS in order (use the curl sequence in MIGRATION_NOTES.md
+   Step 7). Critical verifications:
+   - Tables yahoo_cache AND coach_interactions exist
+   - GET /api/yahoo/cache-status responds
+   - GET /api/yahoo/settings returns {data, meta} with meta.fresh:true
+   - GET /api/admin/coach/summary returns 404 to non-admin (expected)
+   - Open Coach panel, ask matchup question — should reference real
+     Yahoo data in old-coach voice
+   - Same session, ask second question — check telemetry:
+     SELECT cost_usd, input_tokens, cache_read_tokens, question_bucket
+     FROM coach_interactions ORDER BY id DESC LIMIT 3;
+     Turn 2 should show cache_read_tokens > 0.
+
+If turn 2 cache_read_tokens is still 0:
+  - Verify DISABLE_CACHE env var is unset
+  - Verify the system param in ai.ts is being passed as an array with
+    cache_control on the first two blocks
+  - Try again within 5 minutes (cache TTL is 5 min)
+
+If anything fails, stop and tell me what broke. Do not improvise
+fixes — the file structure is intentional.

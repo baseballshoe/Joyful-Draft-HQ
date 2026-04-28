@@ -8,9 +8,11 @@ import multer from "multer";
 import { parseFPBuffer, parseESPNBuffer, parseYahooBuffer, type ESPNParseResult } from "./import-service";
 import * as yahoo from './yahoo';
 import * as ai from './ai';
-import { yahooLeague, aiConversations, type UpdatePlayerRequest } from '@shared/schema';
+import * as yahooCache from './yahoo-cache';
+import { requireAdmin } from './middleware/admin-auth';
+import { yahooLeague, aiConversations, coachInteractions, type UpdatePlayerRequest } from '@shared/schema';
 import { db } from './db';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, gte, desc, sql } from 'drizzle-orm';
 
 // Seed function to populate some initial players if empty
 async function seedDatabase() {
@@ -557,50 +559,184 @@ export async function registerRoutes(
     }
   });
 
-  // ── Yahoo: get waiver wire ────────────────────────────────────────────────
+  // ── Helper: load league key or return 400 ─────────────────────────────────
+  async function getLeagueKeyOrFail(res: any): Promise<string | null> {
+    const [leagueRow] = await db.select().from(yahooLeague).where(eq(yahooLeague.id, 1));
+    if (!leagueRow?.leagueKey) {
+      res.status(400).json({ message: 'No league connected. Connect Yahoo on the /yahoo page.' });
+      return null;
+    }
+    return leagueRow.leagueKey;
+  }
+  function forceRefresh(req: any) { return req.query.force === '1' || req.query.force === 'true'; }
+
+  // ── Yahoo: settings (cache-aware) ─────────────────────────────────────────
+  app.get('/api/yahoo/settings', async (req, res) => {
+    try {
+      const leagueKey = await getLeagueKeyOrFail(res);
+      if (!leagueKey) return;
+      const result = await yahooCache.getCached('settings', () => yahoo.getParsedLeagueSettings(leagueKey), { force: forceRefresh(req) });
+      res.json({ data: result.data, meta: result.meta });
+    } catch (err: any) { res.status(400).json({ message: err.message }); }
+  });
+
+  // ── Yahoo: standings (cache-aware) ────────────────────────────────────────
+  app.get('/api/yahoo/standings', async (req, res) => {
+    try {
+      const leagueKey = await getLeagueKeyOrFail(res);
+      if (!leagueKey) return;
+      const result = await yahooCache.getCached('standings', () => yahoo.getParsedStandings(leagueKey), { force: forceRefresh(req) });
+      res.json({ data: result.data, meta: result.meta });
+    } catch (err: any) { res.status(400).json({ message: err.message }); }
+  });
+
+  // ── Yahoo: scoreboard (cache-aware) ──────────────────────────────────────
+  app.get('/api/yahoo/scoreboard', async (req, res) => {
+    try {
+      const leagueKey = await getLeagueKeyOrFail(res);
+      if (!leagueKey) return;
+      const result = await yahooCache.getCached('scoreboard', () => yahoo.getParsedScoreboard(leagueKey), { force: forceRefresh(req) });
+      res.json({ data: result.data, meta: result.meta });
+    } catch (err: any) { res.status(400).json({ message: err.message }); }
+  });
+
+  // ── Yahoo: all team rosters (cache-aware) ─────────────────────────────────
+  app.get('/api/yahoo/rosters', async (req, res) => {
+    try {
+      const leagueKey = await getLeagueKeyOrFail(res);
+      if (!leagueKey) return;
+      const result = await yahooCache.getCached('rosters', () => yahoo.getAllTeamRosters(leagueKey), { force: forceRefresh(req) });
+      res.json({ data: result.data, meta: result.meta });
+    } catch (err: any) { res.status(400).json({ message: err.message }); }
+  });
+
+  // ── Yahoo: waiver wire (cache-aware) ─────────────────────────────────────
   app.get('/api/yahoo/waiver-wire', async (req, res) => {
     try {
-      const [leagueRow] = await db.select().from(yahooLeague).where(eq(yahooLeague.id, 1));
-      if (!leagueRow?.leagueKey) {
-        return res.status(400).json({ message: 'No league connected' });
-      }
-
-      const pos = (req.query.pos as string) || 'B';
-      const players = await yahoo.getWaiverWire(leagueRow.leagueKey, pos, 25);
-      res.json(players);
-    } catch (err: any) {
-      res.status(400).json({ message: err.message });
-    }
+      const leagueKey = await getLeagueKeyOrFail(res);
+      if (!leagueKey) return;
+      const pos = (req.query.pos as string) === 'P' ? 'P' : 'B';
+      const result = await yahooCache.getCached(`waivers:${pos}`, () => yahoo.getWaiverWire(leagueKey, pos, 25), { force: forceRefresh(req) });
+      res.json({ data: result.data, meta: result.meta });
+    } catch (err: any) { res.status(400).json({ message: err.message }); }
   });
 
-  // ── Yahoo: get standings ──────────────────────────────────────────────────
-  app.get('/api/yahoo/standings', async (_req, res) => {
+  // ── Yahoo: transactions (cache-aware) ─────────────────────────────────────
+  app.get('/api/yahoo/transactions', async (req, res) => {
     try {
-      const [leagueRow] = await db.select().from(yahooLeague).where(eq(yahooLeague.id, 1));
-      if (!leagueRow?.leagueKey) {
-        return res.status(400).json({ message: 'No league connected' });
-      }
-
-      const standings = await yahoo.getStandings(leagueRow.leagueKey);
-      res.json(standings);
-    } catch (err: any) {
-      res.status(400).json({ message: err.message });
-    }
+      const leagueKey = await getLeagueKeyOrFail(res);
+      if (!leagueKey) return;
+      const result = await yahooCache.getCached('transactions', () => yahoo.getRecentTransactions(leagueKey, 25), { force: forceRefresh(req) });
+      res.json({ data: result.data, meta: result.meta });
+    } catch (err: any) { res.status(400).json({ message: err.message }); }
   });
 
-  // ── Yahoo: get scoreboard / matchups ─────────────────────────────────────
-  app.get('/api/yahoo/scoreboard', async (_req, res) => {
+  // ── Yahoo: all data bundled ────────────────────────────────────────────────
+  app.get('/api/yahoo/all', async (req, res) => {
     try {
-      const [leagueRow] = await db.select().from(yahooLeague).where(eq(yahooLeague.id, 1));
-      if (!leagueRow?.leagueKey) {
-        return res.status(400).json({ message: 'No league connected' });
-      }
+      const leagueKey = await getLeagueKeyOrFail(res);
+      if (!leagueKey) return;
+      const f = forceRefresh(req);
+      const [settings, standings, scoreboard, rosters, waiverB, waiverP] = await Promise.all([
+        yahooCache.getCached('settings',   () => yahoo.getParsedLeagueSettings(leagueKey), { force: f }),
+        yahooCache.getCached('standings',  () => yahoo.getParsedStandings(leagueKey),      { force: f }),
+        yahooCache.getCached('scoreboard', () => yahoo.getParsedScoreboard(leagueKey),     { force: f }),
+        yahooCache.getCached('rosters',    () => yahoo.getAllTeamRosters(leagueKey),        { force: f }),
+        yahooCache.getCached('waivers:B',  () => yahoo.getWaiverWire(leagueKey, 'B', 25),  { force: f }),
+        yahooCache.getCached('waivers:P',  () => yahoo.getWaiverWire(leagueKey, 'P', 25),  { force: f }),
+      ]);
+      res.json({
+        settings:   { data: settings.data,   meta: settings.meta },
+        standings:  { data: standings.data,  meta: standings.meta },
+        scoreboard: { data: scoreboard.data, meta: scoreboard.meta },
+        rosters:    { data: rosters.data,    meta: rosters.meta },
+        waiversBat: { data: waiverB.data,    meta: waiverB.meta },
+        waiversPit: { data: waiverP.data,    meta: waiverP.meta },
+      });
+      broadcast({ type: 'yahoo_synced', data: { force: f } });
+    } catch (err: any) { res.status(400).json({ message: err.message }); }
+  });
 
-      const scoreboard = await yahoo.getScoreboard(leagueRow.leagueKey);
-      res.json(scoreboard);
-    } catch (err: any) {
-      res.status(400).json({ message: err.message });
-    }
+  // ── Yahoo: cache status ────────────────────────────────────────────────────
+  app.get('/api/yahoo/cache-status', async (_req, res) => {
+    try {
+      const status = await yahooCache.getCacheStatus();
+      res.json(status);
+    } catch (err: any) { res.status(400).json({ message: err.message }); }
+  });
+
+  // ── Yahoo: force refresh ───────────────────────────────────────────────────
+  app.post('/api/yahoo/refresh', async (req, res) => {
+    try {
+      const key = req.body?.key as string | undefined;
+      if (key) { await yahooCache.invalidateCache(key); }
+      else      { await yahooCache.invalidateCache(); }
+      res.json({ ok: true, cleared: key ?? 'all' });
+      broadcast({ type: 'yahoo_cache_cleared', data: { key: key ?? 'all' } });
+    } catch (err: any) { res.status(400).json({ message: err.message }); }
+  });
+
+  // ── Admin: coach summary ───────────────────────────────────────────────────
+  app.get('/api/admin/coach/summary', requireAdmin, async (_req, res) => {
+    try {
+      const now = new Date();
+      const startToday = new Date(now); startToday.setHours(0, 0, 0, 0);
+      const start7  = new Date(now.getTime() - 7  * 24 * 3600 * 1000);
+      const start30 = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
+      const [today]  = await db.select({ total: sql<number>`COALESCE(SUM(${coachInteractions.costUsd}), 0)::float`, turns: sql<number>`COUNT(*)::int` }).from(coachInteractions).where(gte(coachInteractions.createdAt, startToday));
+      const [last7]  = await db.select({ total: sql<number>`COALESCE(SUM(${coachInteractions.costUsd}), 0)::float`, turns: sql<number>`COUNT(*)::int` }).from(coachInteractions).where(gte(coachInteractions.createdAt, start7));
+      const [last30] = await db.select({ total: sql<number>`COALESCE(SUM(${coachInteractions.costUsd}), 0)::float`, turns: sql<number>`COUNT(*)::int` }).from(coachInteractions).where(gte(coachInteractions.createdAt, start30));
+      const [cacheStats] = await db.select({ cacheReads: sql<number>`COALESCE(SUM(${coachInteractions.cacheReadTokens}), 0)::int`, cacheWrites: sql<number>`COALESCE(SUM(${coachInteractions.cacheCreationTokens}), 0)::int`, plainInput: sql<number>`COALESCE(SUM(${coachInteractions.inputTokens}), 0)::int` }).from(coachInteractions).where(gte(coachInteractions.createdAt, start30));
+      const totalInputTokens = cacheStats.cacheReads + cacheStats.cacheWrites + cacheStats.plainInput;
+      const cacheHitRate = totalInputTokens > 0 ? cacheStats.cacheReads / totalInputTokens : 0;
+      res.json({ today: { cost: today.total, turns: today.turns }, last7Days: { cost: last7.total, turns: last7.turns }, last30Days: { cost: last30.total, turns: last30.turns }, monthlyRunRate: last30.total, cacheHitRate });
+    } catch (err: any) { console.error('[admin] summary failed:', err); res.status(500).json({ message: err.message }); }
+  });
+
+  // ── Admin: daily cost trend ────────────────────────────────────────────────
+  app.get('/api/admin/coach/trend', requireAdmin, async (_req, res) => {
+    try {
+      const start30 = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      const rows = await db.select({ day: sql<string>`DATE(${coachInteractions.createdAt})::text`, cost: sql<number>`COALESCE(SUM(${coachInteractions.costUsd}), 0)::float`, turns: sql<number>`COUNT(*)::int` }).from(coachInteractions).where(gte(coachInteractions.createdAt, start30)).groupBy(sql`DATE(${coachInteractions.createdAt})`).orderBy(sql`DATE(${coachInteractions.createdAt})`);
+      res.json({ days: rows });
+    } catch (err: any) { console.error('[admin] trend failed:', err); res.status(500).json({ message: err.message }); }
+  });
+
+  // ── Admin: question-bucket breakdown ─────────────────────────────────────
+  app.get('/api/admin/coach/buckets', requireAdmin, async (_req, res) => {
+    try {
+      const start30 = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      const rows = await db.select({ bucket: coachInteractions.questionBucket, count: sql<number>`COUNT(*)::int`, cost: sql<number>`COALESCE(SUM(${coachInteractions.costUsd}), 0)::float` }).from(coachInteractions).where(gte(coachInteractions.createdAt, start30)).groupBy(coachInteractions.questionBucket).orderBy(desc(sql`COUNT(*)`));
+      res.json({ buckets: rows });
+    } catch (err: any) { console.error('[admin] buckets failed:', err); res.status(500).json({ message: err.message }); }
+  });
+
+  // ── Admin: page-context breakdown ─────────────────────────────────────────
+  app.get('/api/admin/coach/pages', requireAdmin, async (_req, res) => {
+    try {
+      const start30 = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      const rows = await db.select({ page: coachInteractions.pageContext, count: sql<number>`COUNT(*)::int`, cost: sql<number>`COALESCE(SUM(${coachInteractions.costUsd}), 0)::float` }).from(coachInteractions).where(gte(coachInteractions.createdAt, start30)).groupBy(coachInteractions.pageContext).orderBy(desc(sql`COUNT(*)`));
+      res.json({ pages: rows });
+    } catch (err: any) { console.error('[admin] pages failed:', err); res.status(500).json({ message: err.message }); }
+  });
+
+  // ── Admin: most expensive turns ───────────────────────────────────────────
+  app.get('/api/admin/coach/expensive', requireAdmin, async (req, res) => {
+    try {
+      const limit = Math.min(parseInt((req.query.limit as string) ?? '20', 10), 100);
+      const start7 = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+      const rows = await db.select().from(coachInteractions).where(gte(coachInteractions.createdAt, start7)).orderBy(desc(coachInteractions.costUsd)).limit(limit);
+      res.json({ turns: rows });
+    } catch (err: any) { console.error('[admin] expensive failed:', err); res.status(500).json({ message: err.message }); }
+  });
+
+  // ── Admin: user cost table ─────────────────────────────────────────────────
+  app.get('/api/admin/coach/users', requireAdmin, async (_req, res) => {
+    try {
+      const start30 = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      const rows = await db.select({ userId: coachInteractions.userId, turns: sql<number>`COUNT(*)::int`, cost: sql<number>`COALESCE(SUM(${coachInteractions.costUsd}), 0)::float`, lastTurn: sql<Date>`MAX(${coachInteractions.createdAt})` }).from(coachInteractions).where(gte(coachInteractions.createdAt, start30)).groupBy(coachInteractions.userId).orderBy(desc(sql`SUM(${coachInteractions.costUsd})`));
+      res.json({ users: rows });
+    } catch (err: any) { console.error('[admin] users failed:', err); res.status(500).json({ message: err.message }); }
   });
 
   // ── AI: streaming chat endpoint (Server-Sent Events) ────────────────────

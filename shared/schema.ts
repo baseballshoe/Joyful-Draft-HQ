@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, timestamp, real, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, real, boolean, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -288,3 +288,43 @@ export const playerStatus = pgTable("player_status", {
 });
 
 export type PlayerStatus = typeof playerStatus.$inferSelect;
+
+// ── Yahoo Cache ─────────────────────────────────────────────────────────────
+export const yahooCache = pgTable("yahoo_cache", {
+  id:        serial("id").primaryKey(),
+  cacheKey:  text("cache_key").notNull().unique(),
+  data:      jsonb("data").notNull(),
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+});
+
+export type YahooCacheRow = typeof yahooCache.$inferSelect;
+
+// ── Coach Interactions ────────────────────────────────────────────────────────
+export const coachInteractions = pgTable("coach_interactions", {
+  id:                  serial("id").primaryKey(),
+  userId:              integer("user_id").notNull(),
+  conversationId:      text("conversation_id").notNull(),
+  turnNumber:          integer("turn_number").notNull(),
+  userMessage:         text("user_message").notNull(),
+  assistantMessage:    text("assistant_message").notNull(),
+  pageContext:         text("page_context"),
+  questionBucket:      text("question_bucket"),
+  model:               text("model").notNull(),
+  inputTokens:         integer("input_tokens").notNull().default(0),
+  outputTokens:        integer("output_tokens").notNull().default(0),
+  cacheCreationTokens: integer("cache_creation_tokens").notNull().default(0),
+  cacheReadTokens:     integer("cache_read_tokens").notNull().default(0),
+  costUsd:             real("cost_usd").notNull().default(0),
+  responseTimeMs:      integer("response_time_ms"),
+  errored:             boolean("errored").notNull().default(false),
+  errorMessage:        text("error_message"),
+  createdAt:           timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdIdx:       index("coach_interactions_user_id_idx").on(t.userId),
+  createdAtIdx:    index("coach_interactions_created_at_idx").on(t.createdAt),
+  conversationIdx: index("coach_interactions_conversation_idx").on(t.conversationId, t.turnNumber),
+  bucketIdx:       index("coach_interactions_bucket_idx").on(t.questionBucket),
+}));
+
+export type CoachInteractionRow    = typeof coachInteractions.$inferSelect;
+export type CoachInteractionInsert = typeof coachInteractions.$inferInsert;
