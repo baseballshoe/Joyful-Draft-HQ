@@ -1,18 +1,23 @@
 name: Pull basic stats
 
-# Runs the MLB Stats API basic-stats backfill nightly. Sequenced
-# between pull-players (06:00 UTC, populates MLBAM IDs) and
-# pull-stats (06:30 UTC, scrapes Savant + FanGraphs advanced metrics).
+# Runs the MLB Stats API basic-stats backfill twice daily. Sequenced
+# between pull-players (15 min before) and pull-stats (15 min after).
 #
 # This script gives Coach baseline counting + rate stats for every
 # active MLB player — including QS, ERA, WHIP, K/9, BB/9 for pitchers
 # and AVG/OBP/SLG/HR/SB/BB/K for batters — even when the Statcast
 # scrapes haven't caught up with recent debuts.
+#
+# v1.5.1.4: TWICE-DAILY pulls so users have fresh data by 5 AM ET.
+#
+# Schedule (UTC):
+#   First cascade:  09:15 UTC = 4:15 AM EST / 5:15 AM EDT
+#   Second cascade: 13:15 UTC = 8:15 AM EST / 9:15 AM EDT
 
 on:
   schedule:
-    # Daily at 06:15 UTC (15 min after pull-players, 15 min before pull-stats)
-    - cron: '15 6 * * *'
+    - cron: '15 9 * * *'   # First cascade
+    - cron: '15 13 * * *'  # Second cascade
   workflow_dispatch:
 
 jobs:
