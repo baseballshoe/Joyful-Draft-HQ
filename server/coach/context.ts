@@ -537,7 +537,19 @@ function renderMatchup(sb: ParsedScoreboard, settings: ParsedLeagueSettings | nu
       }
       catLines.push(`  ${cat.displayName}: ${myV} vs ${opV}${edge}`);
     }
-    if (catLines.length) lines.push('Category scoreline:\n' + catLines.join('\n'));
+    if (catLines.length) {
+      // v1.5.1.8: compute running score from markers and surface it
+      // in the matchup header so Coach uses the literal number instead
+      // of inferring (or hallucinating) one.
+      const wins   = catLines.filter(l => l.endsWith(' ✅')).length;
+      const losses = catLines.filter(l => l.endsWith(' ❌')).length;
+      const ties   = catLines.filter(l => l.endsWith(' =')).length;
+      const scoreStr = ties > 0
+        ? `${wins}-${losses}-${ties} (your wins–losses–ties)`
+        : `${wins}-${losses} (your wins–losses)`;
+      lines.push(`**Current category score: ${scoreStr}**`);
+      lines.push('Category scoreline:\n' + catLines.join('\n'));
+    }
   }
   return lines.join('\n');
 }
