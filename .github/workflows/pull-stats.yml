@@ -1,10 +1,18 @@
 name: Pull Stats
 
-# Runs nightly at 9:00 AM UTC (4:00 AM Eastern / 1:00 AM Pacific)
+# Runs the FanGraphs + Baseball Savant advanced stats scrape twice daily.
+#
+# v1.5.1.4: TWICE-DAILY pulls so users have fresh data by 5 AM ET.
+#
+# Schedule (UTC):
+#   First cascade:  09:30 UTC = 4:30 AM EST / 5:30 AM EDT
+#   Second cascade: 13:30 UTC = 8:30 AM EST / 9:30 AM EDT
+#
 # Also can be triggered manually from the Actions tab.
 on:
   schedule:
-    - cron: '0 9 * * *'
+    - cron: '30 9 * * *'   # First cascade
+    - cron: '30 13 * * *'  # Second cascade
   workflow_dispatch:  # Manual trigger button
 
 jobs:
