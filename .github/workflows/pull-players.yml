@@ -5,14 +5,26 @@ name: Pull MLB players
 # MLBAM IDs in player_ids — otherwise the stats pipeline can't match
 # them and Coach gets "no stats for this player".
 #
-# Schedule: 06:00 UTC = 02:00 ET. Runs ~30 min before pull-stats.yml
-# (which is presumably scheduled at 06:30 UTC). Adjust the cron in
-# pull-stats.yml if you want them further apart.
+# v1.5.1.4: TWICE-DAILY pulls so users have fresh data by 5 AM ET.
+#
+# Schedule (UTC):
+#   First cascade (early — captures Yahoo's overnight processing):
+#     09:00 UTC = 4:00 AM EST / 5:00 AM EDT — pull-players (this)
+#     09:15 UTC = 4:15 AM EST / 5:15 AM EDT — pull-basic-stats
+#     09:30 UTC = 4:30 AM EST / 5:30 AM EDT — pull-stats
+#     09:45 UTC = 4:45 AM EST / 5:45 AM EDT — pull-yahoo-stats
+#
+#   Second cascade (safety net — catches any West Coast late games or
+#   Yahoo processing delays):
+#     13:00 UTC = 8:00 AM EST / 9:00 AM EDT — pull-players (this)
+#     13:15 UTC = 8:15 AM EST / 9:15 AM EDT — pull-basic-stats
+#     13:30 UTC = 8:30 AM EST / 9:30 AM EDT — pull-stats
+#     13:45 UTC = 8:45 AM EST / 9:45 AM EDT — pull-yahoo-stats
 
 on:
   schedule:
-    # Daily at 06:00 UTC
-    - cron: '0 6 * * *'
+    - cron: '0 9 * * *'   # 09:00 UTC (first cascade)
+    - cron: '0 13 * * *'  # 13:00 UTC (second cascade)
   workflow_dispatch:   # allow manual trigger from the Actions UI
 
 jobs:
