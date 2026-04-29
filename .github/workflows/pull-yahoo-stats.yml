@@ -1,0 +1,43 @@
+name: Pull Yahoo stats
+
+# Runs the Yahoo Fantasy stats pull nightly. Sequenced AFTER all other
+# stat sources so it overwrites with authoritative Yahoo values last,
+# matching the Coach context.ts SOURCE_PRIORITY (yahoo wins for league
+# scored categories).
+#
+# Schedule:
+#   06:00 UTC — pull-players       (MLB rosters + IDs)
+#   06:15 UTC — pull-basic-stats   (MLB Stats API basics for all)
+#   06:30 UTC — pull-stats         (FanGraphs + Savant advanced)
+#   06:45 UTC — pull-yahoo-stats   (this — Yahoo authoritative)
+
+on:
+  schedule:
+    - cron: '45 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  pull-yahoo-stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run pull_yahoo_stats.ts
+        env:
+          DATABASE_URL:        ${{ secrets.DATABASE_URL }}
+          YAHOO_CLIENT_ID:     ${{ secrets.YAHOO_CLIENT_ID }}
+          YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
+          APP_BASE_URL:        ${{ secrets.APP_BASE_URL }}
+        run: npx tsx scripts/pull_yahoo_stats.ts
