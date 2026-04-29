@@ -14,7 +14,6 @@
 //     silently)
 //   - No league connected: log warning, exit 0
 // ─────────────────────────────────────────────────────────────────────
-import 'dotenv/config';
 import { pullAllYahooStatsForCurrentLeague } from '../server/external/yahoo-stats';
 
 function log(level: 'info' | 'warn' | 'error', msg: string) {
