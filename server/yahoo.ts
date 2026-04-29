@@ -374,6 +374,48 @@ export async function getWaiverWire(leagueKey: string, position = 'B', count = 2
   return players;
 }
 
+
+
+// ── Player stats (bulk, chunked at 25/request) ────────────────────────────
+
+/** Get season stats for players by player keys (chunked at 25/request). */
+export async function getPlayerStats(
+  playerKeys: string[],
+  leagueKey:  string,
+): Promise<YahooPlayerStats[]> {
+  if (playerKeys.length === 0) return [];
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < playerKeys.length; i += 25) {
+    chunks.push(playerKeys.slice(i, i + 25));
+  }
+
+  const allStats: YahooPlayerStats[] = [];
+  for (const chunk of chunks) {
+    const keys = chunk.join(',');
+    const data = await yahooFetch(
+      `/league/${leagueKey}/players;player_keys=${keys}/stats`
+    );
+    const playersData = data.fantasy_content?.league?.[1]?.players;
+    for (let i = 0; i < (playersData?.count ?? 0); i++) {
+      const p = playersData?.[i]?.player;
+      if (!p) continue;
+      const info  = p[0];
+      const stats = p[1]?.player_stats?.stats ?? [];
+      const statMap: Record<string, string> = {};
+      stats.forEach((s: any) => {
+        statMap[s.stat.stat_id] = s.stat.value;
+      });
+      allStats.push({
+        playerKey: info?.[0]?.player_key,
+        playerId:  info?.[1]?.player_id,
+        name:      info?.[2]?.name?.full,
+        stats:     statMap,
+      });
+    }
+  }
+  return allStats;
+}
 // ── Settings (parsed) ─────────────────────────────────────────────────────
 
 export async function getLeagueSettings(leagueKey: string) {
