@@ -1,34 +1,27 @@
 // server/external/yahoo-stats.ts
 // ─────────────────────────────────────────────────────────────────────
-// Yahoo Fantasy stats orchestrator (v1.5).
+// Yahoo Fantasy stats orchestrator.
 //
-// PURPOSE:
-//   Pull authoritative season stats from Yahoo for every player in the
-//   user's league universe — rostered + available + waivers. Yahoo's
-//   numbers match the user's league page exactly, which makes Coach
-//   pixel-perfect on the categories the user actually scores (AVG, HR,
-//   SB, RBI, R, QS, SAVE, ERA, WHIP, K).
+// v1.5:    initial implementation — used fixed array indexing
+// v1.5.1:  fix position routing + stats parsing using findAttr walker
 //
-// ARCHITECTURE:
-//   - Uses existing yahoo.ts for OAuth, token refresh, chunked
-//     getPlayerStats. NO duplicated auth logic.
-//   - This module owns: pagination through all league players,
-//     stat-id-to-schema-column mapping, DB writes via Drizzle.
-//   - Intended to be called from scripts/pull_yahoo_stats.ts (nightly
-//     workflow) or from a future in-app refresh route.
+// THE BUG WE FIXED:
+//   The Yahoo /league/{key}/players;status=X endpoint returns each
+//   player as an array of single-key objects. The position of any
+//   given key in that array varies per-endpoint. v1.5 used fixed
+//   indices (info[4] for display_position, info[6] for editorial_team)
+//   which worked for the roster endpoint but NOT for the league
+//   players endpoint — every pitcher was mis-classified as a batter
+//   and ~70% of stats columns came back NULL.
 //
-// DATA SCOPE:
-//   "All players in the league universe" = Yahoo's full player set for
-//   this league, which includes:
-//     - Currently rostered players (status=T)
-//     - Available free agents and waivers (status=A)
-//   We paginate through both and merge by player_key.
+// THE FIX:
+//   Use a findAttr() walker that iterates the array looking for the
+//   matching key — same pattern server/yahoo.ts uses for its other
+//   endpoints. This is robust to Yahoo reshuffling field order.
 //
-// COMMERCIAL NOTE:
-//   Yahoo's API requires commercial license approval before charging
-//   users publicly. The Yahoo stats pipeline is still the right
-//   architecture — just file the application before launching paid
-//   tiers. See 02_COMPLIANCE_FRAMEWORK.md.
+//   Also: switched position detection from parsing display_position
+//   strings to reading the canonical position_type field ("P" or "B").
+//   Yahoo's own definitive classifier — no string parsing needed.
 // ─────────────────────────────────────────────────────────────────────
 import { db } from '../db';
 import {
@@ -44,24 +37,26 @@ const CURRENT_SEASON = new Date().getFullYear();
 const DATA_SOURCE    = 'yahoo';
 
 const PLAYERS_PER_PAGE = 25;
-const MAX_PLAYER_PAGES = 100;        // safety cap (~2,500 players)
+const MAX_PLAYER_PAGES = 100;
 const RETRY_MAX        = 3;
 const RETRY_BASE_MS    = 1000;
 
-// ── Stat-display-name → schema-field mapping ─────────────────────────────
+// ── Yahoo array helper (mirrors yahoo.ts findAttr) ───────────────────────
 //
-// We don't hardcode Yahoo stat_id values directly. Instead we use the
-// league_settings cached payload to get the user's actual
-// stat_id ↔ display_name mapping, then map display_name → schema field
-// via stable conventions Yahoo uses across all MLB leagues.
-//
-// This auto-adapts to any league configuration (OPS leagues, K-BB%
-// leagues, etc.) as long as Yahoo's display_name conventions hold.
-//
-// IMPORTANT: keys are camelCase to match Drizzle schema fields.
+// Yahoo returns objects-with-numeric-keys as if they were arrays. To find
+// a value by key, walk the array looking for an item that contains it.
+// This is the canonical pattern in yahoo.ts; we duplicate here to avoid
+// adding an export to the existing file.
+function findAttr(obj: any, key: string): any {
+  if (!Array.isArray(obj)) return obj?.[key];
+  for (const item of obj) {
+    if (item && typeof item === 'object' && key in item) return item[key];
+  }
+  return undefined;
+}
 
+// ── Stat-display-name → schema-field mapping ─────────────────────────────
 const PITCHER_DISPLAY_TO_FIELD: Record<string, string> = {
-  // counting
   'W':    'wins',
   'L':    'losses',
   'SV':   'saves',
@@ -76,7 +71,6 @@ const PITCHER_DISPLAY_TO_FIELD: Record<string, string> = {
   'HR':   'homerunsAllowed',
   'G':    'games',
   'GS':   'gamesStarted',
-  // rate
   'ERA':  'era',
   'WHIP': 'whip',
   'K/9':  'kPer9',
@@ -84,12 +78,10 @@ const PITCHER_DISPLAY_TO_FIELD: Record<string, string> = {
 };
 
 const BATTER_DISPLAY_TO_FIELD: Record<string, string> = {
-  // rate
   'AVG':  'avg',
   'OBP':  'obp',
   'SLG':  'slg',
   'OPS':  'ops',
-  // counting
   'AB':   'atBats',
   'PA':   'plateApps',
   'R':    'runs',
@@ -106,25 +98,14 @@ const BATTER_DISPLAY_TO_FIELD: Record<string, string> = {
   'G':    'games',
 };
 
-// ── Position classifier ──────────────────────────────────────────────────
-const PITCHER_POSITIONS = new Set(['P', 'SP', 'RP']);
-
-function isPitcherPosition(displayPosition: string | null | undefined): boolean {
-  if (!displayPosition) return false;
-  // Yahoo can return comma-separated multi-position strings like
-  // "1B,3B" or single positions like "SP". Treat as pitcher if ANY
-  // position is a pitcher position.
-  const positions = displayPosition.split(',').map(p => p.trim());
-  return positions.some(p => PITCHER_POSITIONS.has(p));
-}
-
-// ── Page-through-all-players ─────────────────────────────────────────────
+// ── Page-through-all-players (v1.5.1: findAttr-based parsing) ────────────
 export interface YahooLeaguePlayer {
   playerKey:       string;
   playerId:        string;
   name:            string;
   editorialTeam:   string;
   displayPosition: string;
+  positionType:    string;       // 'P' | 'B' (Yahoo canonical)
   isPitcher:       boolean;
 }
 
@@ -149,13 +130,20 @@ async function fetchPlayersPage(
         if (!p) continue;
         const info = p[0];
 
-        const playerKey       = info?.[0]?.player_key as string | undefined;
-        const playerId        = info?.[1]?.player_id  as string | undefined;
-        const name            = info?.[2]?.name?.full as string | undefined;
-        const editorialTeam   = info?.[6]?.editorial_team_abbr as string | undefined;
-        const displayPosition = info?.[4]?.display_position    as string | undefined;
+        // ── v1.5.1: use findAttr walker, not fixed indices ──
+        const playerKey       = findAttr(info, 'player_key')          as string | undefined;
+        const playerId        = findAttr(info, 'player_id')           as string | undefined;
+        const nameObj         = findAttr(info, 'name');
+        const name            = nameObj?.full as string | undefined;
+        const editorialTeam   = findAttr(info, 'editorial_team_abbr') as string | undefined;
+        const displayPosition = findAttr(info, 'display_position')    as string | undefined;
+        const positionType    = findAttr(info, 'position_type')       as string | undefined;
 
         if (!playerKey || !name) continue;
+
+        // Use Yahoo's canonical position_type ("P" / "B") for routing
+        // rather than parsing display_position strings.
+        const isPitcher = positionType === 'P';
 
         out.push({
           playerKey,
@@ -163,7 +151,8 @@ async function fetchPlayersPage(
           name,
           editorialTeam:   editorialTeam ?? '',
           displayPosition: displayPosition ?? '',
-          isPitcher:       isPitcherPosition(displayPosition),
+          positionType:    positionType ?? '',
+          isPitcher,
         });
       }
       return out;
@@ -178,10 +167,8 @@ async function fetchPlayersPage(
 }
 
 /**
- * Fetch every player Yahoo considers part of this league's universe.
- *
- * Two pagination loops, one per status (T = taken, A = available).
- * Merged and de-duplicated by player_key.
+ * Fetch every player Yahoo lists for this league (rostered + available).
+ * De-duplicated by player_key.
  */
 export async function fetchAllLeaguePlayers(leagueKey: string): Promise<YahooLeaguePlayer[]> {
   const seen = new Map<string, YahooLeaguePlayer>();
@@ -311,7 +298,6 @@ async function writePitcherRows(rows: ParsedRow[]): Promise<number> {
 
   if (values.length === 0) return 0;
 
-  // Drizzle batched insert
   const CHUNK = 100;
   for (let i = 0; i < values.length; i += CHUNK) {
     const chunk = values.slice(i, i + CHUNK);
@@ -358,30 +344,35 @@ export interface YahooStatsResult {
   pitchersWritten:     number;
   battersWritten:      number;
   qualityStartsTotal:  number;
+  // v1.5.1: routing diagnostics
+  classifiedAsPitcher: number;
+  classifiedAsBatter:  number;
+  classifiedUnknown:   number;
   elapsedMs:           number;
   errorMessage?:       string;
 }
 
-/**
- * Top-level: fetch every league player, get their stats from Yahoo,
- * parse, write to pitcher_stats / batter_stats with data_source='yahoo'.
- *
- * Idempotent — DELETE-and-INSERT pattern means re-runs overwrite cleanly.
- */
 export async function pullAllYahooStats(leagueKey: string): Promise<YahooStatsResult> {
   const start = Date.now();
 
-  // 1. League settings → stat_id → display_name map
   const settings  = await getParsedLeagueSettings(leagueKey);
   const statIdMap = buildStatIdMap(settings);
 
-  // 2. Fetch every player Yahoo lists for this league
   const allYahooPlayers = await fetchAllLeaguePlayers(leagueKey);
 
-  // 3. Build name+team → pid lookup
+  // v1.5.1: classification diagnostics — we want to see if position_type
+  // is reliably populated for everyone.
+  let classifiedAsPitcher = 0;
+  let classifiedAsBatter  = 0;
+  let classifiedUnknown   = 0;
+  for (const yp of allYahooPlayers) {
+    if (yp.positionType === 'P')      classifiedAsPitcher++;
+    else if (yp.positionType === 'B') classifiedAsBatter++;
+    else                               classifiedUnknown++;
+  }
+
   const lookup = await buildPlayerLookup();
 
-  // 4. Resolve each Yahoo player → DB player_id
   const matched: { yahoo: YahooLeaguePlayer; pid: number }[] = [];
   let unmatched = 0;
   for (const yp of allYahooPlayers) {
@@ -390,12 +381,10 @@ export async function pullAllYahooStats(leagueKey: string): Promise<YahooStatsRe
     else     unmatched++;
   }
 
-  // 5. Bulk-fetch stats (chunked at 25 inside getPlayerStats)
   const playerKeys = matched.map(m => m.yahoo.playerKey);
   const allStats   = await getPlayerStats(playerKeys, leagueKey);
   const statsByKey = new Map(allStats.map(s => [s.playerKey, s.stats]));
 
-  // 6. Parse + split by pitcher/batter
   const pitcherRows: ParsedRow[] = [];
   const batterRows:  ParsedRow[] = [];
 
@@ -411,45 +400,44 @@ export async function pullAllYahooStats(leagueKey: string): Promise<YahooStatsRe
     else                   batterRows.push(row);
   }
 
-  // 7. QS sanity total
   let qsTotal = 0;
   for (const r of pitcherRows) {
     const qs = r.fields['qualityStarts'];
     if (typeof qs === 'number') qsTotal += qs;
   }
 
-  // 8. Write
   const pitchersWritten = await writePitcherRows(pitcherRows);
   const battersWritten  = await writeBatterRows(batterRows);
 
   return {
-    totalPlayers:       allYahooPlayers.length,
-    matchedPlayers:     matched.length,
-    unmatchedPlayers:   unmatched,
+    totalPlayers:        allYahooPlayers.length,
+    matchedPlayers:      matched.length,
+    unmatchedPlayers:    unmatched,
     pitchersWritten,
     battersWritten,
-    qualityStartsTotal: qsTotal,
-    elapsedMs:          Date.now() - start,
+    qualityStartsTotal:  qsTotal,
+    classifiedAsPitcher,
+    classifiedAsBatter,
+    classifiedUnknown,
+    elapsedMs:           Date.now() - start,
   };
 }
 
-/**
- * Helper: load league_key from yahoo_league row and run.
- * Returns a result with `errorMessage` set if no league connected —
- * caller should treat that as a soft failure.
- */
 export async function pullAllYahooStatsForCurrentLeague(): Promise<YahooStatsResult> {
   const [league] = await db.select().from(yahooLeague).where(eq(yahooLeague.id, 1));
   if (!league) {
     return {
-      totalPlayers:       0,
-      matchedPlayers:     0,
-      unmatchedPlayers:   0,
-      pitchersWritten:    0,
-      battersWritten:     0,
-      qualityStartsTotal: 0,
-      elapsedMs:          0,
-      errorMessage:       'No Yahoo league connected — run /yahoo flow first',
+      totalPlayers:        0,
+      matchedPlayers:      0,
+      unmatchedPlayers:    0,
+      pitchersWritten:     0,
+      battersWritten:      0,
+      qualityStartsTotal:  0,
+      classifiedAsPitcher: 0,
+      classifiedAsBatter:  0,
+      classifiedUnknown:   0,
+      elapsedMs:           0,
+      errorMessage:        'No Yahoo league connected — run /yahoo flow first',
     };
   }
   return pullAllYahooStats(league.leagueKey);
