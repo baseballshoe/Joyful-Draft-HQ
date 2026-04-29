@@ -7,11 +7,35 @@
 // v1.4: multi-source row merging + comprehensive stat formatters +
 //       fixes field-name bugs (strikeoutsPitched, hitsAllowed, etc.)
 // v1.5: Yahoo as highest-priority data source
-// v1.5.1.2: defensive percentage formatter — handles both decimal
-//           (0-1, FanGraphs convention) and percentage (0-100, Savant
-//           convention) storage formats per column. The same column
-//           can have different formats depending on which source wrote
-//           it; we detect and normalize at format time.
+// v1.5.1.2: defensive percentage formatter
+// v1.5.1.3: ALWAYS include other teams' rosters + tag each player with
+//           roster status (rostered by [team] vs available vs on wire).
+//           Coach can no longer recommend players he can see are owned.
+//
+// THE PROBLEM v1.5.1.3 FIXES:
+//   Coach kept recommending players like Christian Walker who were
+//   already rostered by other teams. Two root causes:
+//   1. shouldIncludeOtherTeams() only loaded rosters when the user
+//      message mentioned "trade/swap/target" — for casual recommendation
+//      questions, Coach had zero awareness of who owned whom.
+//   2. The "available pool" Coach saw was JOYT's own DB (status='available')
+//      which tracks MLB-active players, NOT actual Yahoo league
+//      availability. A player can be MLB-active but rostered in your
+//      specific Yahoo league.
+//
+// THE FIX:
+//   1. Always include other teams' rosters (no regex gate).
+//   2. Build a per-turn map: yahooPlayerKey → status ("yours", "rostered
+//      by Team X", "available"). Tag each player line in every section
+//      so Coach sees availability inline, not buried 5K tokens away.
+//   3. Cross-reference: a player is only labeled "available" if they
+//      are NOT on any team's roster.
+//
+// COST IMPACT:
+//   Adds ~3-5K tokens per turn (other teams' compact rosters).
+//   At single-user scale (you), pennies/month. At commercial scale,
+//   keep an eye on this — could compress with abbreviations later if
+//   needed.
 //
 // Block layout:
 //   1. staticPrefix      Coach personality + sport pack + league
@@ -19,12 +43,8 @@
 //   2. semiStaticBlock   Temporal context + standings + matchup +
 //                        week schedule summary. Cached; busts daily.
 //   3. volatileBlock     User's roster + available pool + waivers
-//                        + optionally other teams. NOT cached.
-//
-// MULTI-SOURCE MERGE (v1.4):
-//   pitcher_stats and batter_stats can have multiple rows per
-//   (player_id, season) — one per data_source. v1.5 priority order:
-//   yahoo > mlb-stats-api > fangraphs > savant.
+//                        + ALWAYS other teams' rosters (v1.5.1.3).
+//                        NOT cached.
 // ─────────────────────────────────────────────────────────────────────
 import { db } from '../db';
 import {
@@ -57,31 +77,16 @@ const SOURCE_PRIORITY = ['yahoo', 'mlb-stats-api', 'fangraphs', 'savant'];
 //
 //   Multiplying by 100 unconditionally turns 26.1 into 2610%.
 //   Skipping the multiply unconditionally turns 0.239 into 0.2%.
-//   Either way, half our data renders wrong.
 //
 // THE FIX:
 //   Detect at format time. Values > 1 are already percentages. Values
 //   ≤ 1 are decimal fractions and need the * 100. This handles both
 //   FanGraphs convention (decimal) and Savant convention (already-pct)
 //   without rewriting the data layer.
-//
-//   This SHOULD be a safe heuristic for percent-style columns:
-//   no real pct stat is naturally between 1.0 and 100% expressed as
-//   decimal. If hitters had a 1.0 (= 100%) anything-rate, fantasy
-//   wouldn't matter anymore.
-//
-// LONG-TERM NOTE:
-//   The architecturally cleaner fix is normalizing at the write layer
-//   (every source writes decimal). But with 4 sources writing the same
-//   column with different conventions and the possibility of new
-//   sources later (commercial swap to SportsDataIO), defensive read is
-//   more durable than a rolling-deploy-and-rescrape across all sources.
 
 function fmtPct(v: number | null | undefined, digits = 1): string | null {
   if (v == null || !Number.isFinite(v)) return null;
-  // Already a percentage (e.g., 26.1 from Savant)
   if (v > 1) return `${v.toFixed(digits)}%`;
-  // Decimal fraction (e.g., 0.239 from FanGraphs)
   return `${(v * 100).toFixed(digits)}%`;
 }
 
@@ -125,13 +130,50 @@ function computeTemporalContext(today: Date = new Date()): TemporalContext {
   };
 }
 
-// ── Lazy-load relevance check (v1.1) ─────────────────────────────────────
+// ── v1.5.1.3: Yahoo player-availability map ──────────────────────────────
+//
+// Build a single source of truth for "who has whom" across the league.
+// Used to tag every player line with their availability status, so Coach
+// can never recommend a rostered player without knowing it.
 
-const OTHER_TEAMS_RELEVANCE = /\b(trade|trad(e|es|ing)|swap|target|stash|league.?wide|who has|other teams?|opponents?'?\s+roster|strength|weakness|where am i (weak|strong)|cover (my|the)|need help (with|in|at)|short on|deep at)\b/i;
+interface YahooAvailability {
+  /** Map from normalized name → status string */
+  byName: Map<string, string>;
+  /** Map from yahoo player_key → status string */
+  byYahooKey: Map<string, string>;
+}
 
-function shouldIncludeOtherTeams(latestUserMessage: string | undefined): boolean {
-  if (!latestUserMessage) return false;
-  return OTHER_TEAMS_RELEVANCE.test(latestUserMessage);
+function normalizeName(s: string): string {
+  return s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .replace(/\s+(jr|sr|ii|iii|iv)\.?$/, '')
+          .replace(/[^a-z0-9]/g, '');
+}
+
+function buildYahooAvailabilityMap(
+  myTeamName: string | null,
+  rosters:    YahooTeamWithRoster[] | null,
+): YahooAvailability {
+  const byName     = new Map<string, string>();
+  const byYahooKey = new Map<string, string>();
+  if (!rosters) return { byName, byYahooKey };
+
+  for (const team of rosters) {
+    const isMine = team.isOwnedByCurrentLogin;
+    const status = isMine ? '✓ YOURS' : `🔒 ${team.name}`;
+    for (const p of team.roster) {
+      const n = normalizeName(p.name ?? '');
+      if (n) byName.set(n, status);
+      if (p.playerKey) byYahooKey.set(p.playerKey, status);
+    }
+  }
+  return { byName, byYahooKey };
+}
+
+function rosterTag(name: string, avail: YahooAvailability): string {
+  const status = avail.byName.get(normalizeName(name));
+  if (!status) return '🟢 AVAILABLE';
+  return status;
 }
 
 // ── Multi-source row merging (v1.4) ──────────────────────────────────────
@@ -219,22 +261,20 @@ function buildScheduleAnnotation(
   return annotations.length ? ` | ${annotations.join(', ')}` : '';
 }
 
-// ── Comprehensive batter line formatter (v1.4 + v1.5.1.2) ────────────────
+// ── Comprehensive batter line formatter (v1.5.1.3: + roster tag) ─────────
 
 function formatBatterLine(
   p:            any,
   stats:        any | null,
   status:       any | null,
   weekSchedule: WeekSchedule | null,
+  avail:        YahooAvailability,
 ): string {
-  const head = `**${p.name}** (${p.posDisplay}, ${p.team ?? '?'})`;
+  const head = `**${p.name}** (${p.posDisplay}, ${p.team ?? '?'}) ${rosterTag(p.name, avail)}`;
   const headParts: string[] = [head];
 
   if (status?.injuryStatus) {
     headParts.push(`🏥 ${status.injuryStatus}${status.injuryNotes ? ` — ${status.injuryNotes}` : ''}`);
-  }
-  if (status?.currentTeam && status.currentTeam !== p.team) {
-    headParts.push(`team: ${status.currentTeam}`);
   }
 
   const completeness = batterDataCompleteness(stats);
@@ -260,7 +300,7 @@ function formatBatterLine(
 
   const lines: string[] = ['- ' + headParts.join(' | ') + annot];
 
-  // Counting stats (one line)
+  // Counting stats
   const counting: string[] = [];
   if (stats.hits != null)        counting.push(`${stats.hits}H`);
   if (stats.doubles != null)     counting.push(`${stats.doubles}2B`);
@@ -282,7 +322,7 @@ function formatBatterLine(
   if (stats.wRCplus != null) sabermetric.push(`${Math.round(stats.wRCplus)} wRC+`);
   if (sabermetric.length) lines.push(`  · ${sabermetric.join(', ')}`);
 
-  // Statcast quality of contact (v1.5.1.2: defensive pct formatter)
+  // Statcast quality of contact
   const contact: string[] = [];
   if (stats.xBA != null)            contact.push(`${stats.xBA.toFixed(3)} xBA`);
   if (stats.xSLG != null)           contact.push(`${stats.xSLG.toFixed(3)} xSLG`);
@@ -294,7 +334,7 @@ function formatBatterLine(
   if (stats.avgLaunchAngle != null) contact.push(`${stats.avgLaunchAngle.toFixed(1)}° LA`);
   if (contact.length) lines.push(`  · contact: ${contact.join(', ')}`);
 
-  // Plate discipline (v1.5.1.2: defensive pct formatter)
+  // Plate discipline
   const discipline: string[] = [];
   const chase = fmtPct(stats.chasePct);       if (chase) discipline.push(`${chase} chase`);
   const whiff = fmtPct(stats.whiffPct);       if (whiff) discipline.push(`${whiff} whiff`);
@@ -310,7 +350,7 @@ function formatBatterLine(
   return lines.join('\n');
 }
 
-// ── Comprehensive pitcher line formatter (v1.4 + v1.5.1.2) ───────────────
+// ── Comprehensive pitcher line formatter (v1.5.1.3: + roster tag) ────────
 
 function formatPitcherLine(
   p:            any,
@@ -318,15 +358,13 @@ function formatPitcherLine(
   status:       any | null,
   weekSchedule: WeekSchedule | null,
   probables:    ProbableStartsMap | null,
+  avail:        YahooAvailability,
 ): string {
-  const head = `**${p.name}** (${p.posDisplay}, ${p.team ?? '?'})`;
+  const head = `**${p.name}** (${p.posDisplay}, ${p.team ?? '?'}) ${rosterTag(p.name, avail)}`;
   const headParts: string[] = [head];
 
   if (status?.injuryStatus) {
     headParts.push(`🏥 ${status.injuryStatus}${status.injuryNotes ? ` — ${status.injuryNotes}` : ''}`);
-  }
-  if (status?.currentTeam && status.currentTeam !== p.team) {
-    headParts.push(`team: ${status.currentTeam}`);
   }
 
   const completeness = pitcherDataCompleteness(stats);
@@ -337,7 +375,7 @@ function formatPitcherLine(
     return '- ' + headParts.join(' | ') + annot;
   }
 
-  // Top line: identity + key season summary
+  // Top line summary
   const summary: string[] = [];
   if (stats.games != null)          summary.push(`${stats.games}G`);
   if (stats.gamesStarted != null)   summary.push(`${stats.gamesStarted}GS`);
@@ -350,7 +388,7 @@ function formatPitcherLine(
 
   const lines: string[] = ['- ' + headParts.join(' | ') + annot];
 
-  // Counting stats (key fantasy categories)
+  // Counting stats
   const counting: string[] = [];
   if (stats.wins != null)              counting.push(`${stats.wins}W`);
   if (stats.losses != null)            counting.push(`${stats.losses}L`);
@@ -364,7 +402,7 @@ function formatPitcherLine(
   if (stats.homerunsAllowed != null)   counting.push(`${stats.homerunsAllowed}HR`);
   if (counting.length) lines.push(`  · ${counting.join(' / ')}`);
 
-  // Rate stats (v1.5.1.2: defensive pct formatter for rates)
+  // Rate stats
   const rate: string[] = [];
   if (stats.kPer9 != null)    rate.push(`${stats.kPer9.toFixed(2)} K/9`);
   if (stats.bbPer9 != null)   rate.push(`${stats.bbPer9.toFixed(2)} BB/9`);
@@ -382,14 +420,14 @@ function formatPitcherLine(
   if (stats.war != null)   sabermetric.push(`${stats.war.toFixed(1)} WAR`);
   if (sabermetric.length) lines.push(`  · sabermetric: ${sabermetric.join(', ')}`);
 
-  // Pitch arsenal / stuff
+  // Pitch arsenal
   const stuff: string[] = [];
   if (stats.avgFastballVelo != null) stuff.push(`${stats.avgFastballVelo.toFixed(1)} mph FB`);
   if (stats.maxFastballVelo != null) stuff.push(`max ${stats.maxFastballVelo.toFixed(1)}`);
   if (stats.spinRate != null)        stuff.push(`${Math.round(stats.spinRate)} spin`);
   if (stuff.length) lines.push(`  · stuff: ${stuff.join(', ')}`);
 
-  // Statcast against (v1.5.1.2: defensive pct formatter)
+  // Statcast against
   const against: string[] = [];
   if (stats.xwOBAagainst != null)    against.push(`${stats.xwOBAagainst.toFixed(3)} xwOBA`);
   if (stats.xBAagainst != null)      against.push(`${stats.xBAagainst.toFixed(3)} xBA`);
@@ -397,7 +435,7 @@ function formatPitcherLine(
   const hhA  = fmtPct(stats.hardHitPctAgainst); if (hhA)  against.push(`${hhA} HH`);
   if (against.length) lines.push(`  · against: ${against.join(', ')}`);
 
-  // Pitch quality (v1.5.1.2: defensive pct formatter)
+  // Pitch quality
   const quality: string[] = [];
   const csw  = fmtPct(stats.cswPct);          if (csw)  quality.push(`${csw} CSW`);
   const swst = fmtPct(stats.swStrikePct);     if (swst) quality.push(`${swst} SwStr`);
@@ -408,7 +446,7 @@ function formatPitcherLine(
   return lines.join('\n');
 }
 
-// ── Yahoo data renderers (unchanged from v1.4) ───────────────────────────
+// ── Yahoo data renderers ─────────────────────────────────────────────────
 
 function renderLeagueSettings(s: ParsedLeagueSettings): string {
   const battingCats = s.categories.filter(c => c.positionType === 'B').map(c => c.displayName);
@@ -503,10 +541,16 @@ function renderMatchup(sb: ParsedScoreboard, settings: ParsedLeagueSettings | nu
   return lines.join('\n');
 }
 
+// ── v1.5.1.3: ALWAYS render other teams' rosters ─────────────────────────
+//
+// Compact format — name, position, injury status only. No per-player stats
+// (they'd blow up token count). Coach uses this for league-wide awareness:
+// "is X owned, who has thin SP, what's Team Y stacking, etc."
+
 function renderOtherTeams(allTeams: YahooTeamWithRoster[]): string {
   const others = allTeams.filter(t => !t.isOwnedByCurrentLogin);
   if (!others.length) return '';
-  const lines: string[] = ['## Other Teams in League (rosters, no stats)'];
+  const lines: string[] = ['## Other Teams in League (compact rosters — for trade/availability awareness)'];
   for (const team of others) {
     const mgr = team.managerName ? ` · ${team.managerName}` : '';
     lines.push(`\n**${team.name}**${mgr}`);
@@ -515,7 +559,7 @@ function renderOtherTeams(allTeams: YahooTeamWithRoster[]): string {
       continue;
     }
     const compact = team.roster
-      .map(p => `${p.name} (${p.displayPosition}${p.injuryStatus ? `, ${p.injuryStatus}` : ''})`)
+      .map(p => `${p.name} (${p.displayPosition}${p.injuryStatus ? `, 🏥 ${p.injuryStatus}` : ''})`)
       .join('; ');
     lines.push(`  ${compact}`);
   }
@@ -539,11 +583,12 @@ function renderYahooWaivers(waiverB: YahooRosterPlayer[] | null, waiverP: YahooR
   return lines.join('\n\n');
 }
 
-// ── Roster section builders (v1.4: multi-source merge) ───────────────────
+// ── Roster section builders (v1.5.1.3: pass availability map down) ───────
 
 async function buildUserRosterSection(
   weekSchedule: WeekSchedule | null,
   probables:    ProbableStartsMap | null,
+  avail:        YahooAvailability,
 ): Promise<string> {
   try {
     const myRoster = await db.select().from(players).where(eq(players.status, 'mine'));
@@ -574,8 +619,8 @@ async function buildUserRosterSection(
       const stats  = isPitcher ? pitcherByPid.get(p.id) : batterByPid.get(p.id);
       const status = statusByPid.get(p.id);
       lines.push(isPitcher
-        ? formatPitcherLine(p, stats, status, weekSchedule, probables)
-        : formatBatterLine(p, stats, status, weekSchedule));
+        ? formatPitcherLine(p, stats, status, weekSchedule, probables, avail)
+        : formatBatterLine(p, stats, status, weekSchedule, avail));
     }
     return `## Your Roster (full advanced stats, schedule-annotated)\n${lines.join('\n')}`;
   } catch (e) {
@@ -587,6 +632,7 @@ async function buildUserRosterSection(
 async function buildAvailablePoolAndTagged(
   weekSchedule: WeekSchedule | null,
   probables:    ProbableStartsMap | null,
+  avail:        YahooAvailability,
 ): Promise<{ pool: string; tagged: string }> {
   try {
     const available = await db.select().from(players).where(eq(players.status, 'available'));
@@ -611,8 +657,17 @@ async function buildAvailablePoolAndTagged(
     const statusByPid  = new Map(statusRows.map(r => [r.playerId, r]));
 
     let pool = '';
+    // v1.5.1.3: filter out anyone Yahoo says is rostered. Only TRULY available
+    // players belong in the pool — otherwise Coach recommends rostered guys.
     const withData = available
       .filter(p => batterByPid.has(p.id) || pitcherByPid.has(p.id))
+      .filter(p => {
+        const tag = avail.byName.get(normalizeName(p.name ?? ''));
+        // No Yahoo data = could go either way, leave them in.
+        // "🟢 AVAILABLE" status means Yahoo confirms they're free.
+        // "🔒 [Team]" or "✓ YOURS" means rostered — exclude.
+        return !tag || tag === '🟢 AVAILABLE' || !tag.startsWith('🔒') && !tag.startsWith('✓');
+      })
       .sort((a, b) => (a.consensusRank ?? 9999) - (b.consensusRank ?? 9999))
       .slice(0, 60);
 
@@ -623,11 +678,11 @@ async function buildAvailablePoolAndTagged(
         const stats  = isPitcher ? pitcherByPid.get(p.id) : batterByPid.get(p.id);
         const status = statusByPid.get(p.id);
         lines.push(isPitcher
-          ? formatPitcherLine(p, stats, status, weekSchedule, probables)
-          : formatBatterLine(p, stats, status, weekSchedule));
+          ? formatPitcherLine(p, stats, status, weekSchedule, probables, avail)
+          : formatBatterLine(p, stats, status, weekSchedule, avail));
       }
-      pool = `## Available Players With Current Data (top ${withData.length})
-These have stats and are not on rosters. Recommend adds from this pool primarily.
+      pool = `## Available Players With Current Data (top ${withData.length}, Yahoo-cross-referenced)
+These have stats AND are confirmed not on any team's Yahoo roster. Recommend adds from this pool primarily.
 
 ${lines.join('\n')}`;
     }
@@ -636,7 +691,7 @@ ${lines.join('\n')}`;
     const taggedPlayers = available.filter(p => p.tags && p.tags.length > 0).slice(0, 25);
     if (taggedPlayers.length > 0) {
       const lines = taggedPlayers.map(p =>
-        `- **${p.name}** (${p.posDisplay}, ${p.team ?? '?'}) — tags: ${p.tags}`
+        `- **${p.name}** (${p.posDisplay}, ${p.team ?? '?'}) ${rosterTag(p.name ?? '', avail)} — tags: ${p.tags}`
       );
       tagged = `## Players You've Tagged\n${lines.join('\n')}`;
     }
@@ -688,7 +743,7 @@ export interface CoachContextResult {
 }
 
 export async function buildCoachContext(opts: CoachContextOptions): Promise<CoachContextResult> {
-  const { pageContext, latestUserMessage } = opts;
+  const { pageContext } = opts;
   const temporal = computeTemporalContext(opts.now ?? new Date());
 
   const [leagueRow] = await db.select().from(yahooLeague).where(eq(yahooLeague.id, 1));
@@ -715,7 +770,10 @@ export async function buildCoachContext(opts: CoachContextOptions): Promise<Coac
     safeGetProbables(temporal),
   ]);
 
-  // Static prefix
+  // v1.5.1.3: Build the availability map ONCE per turn from Yahoo rosters
+  const avail = buildYahooAvailabilityMap(leagueRow?.myTeamName ?? null, rosters);
+
+  // Static prefix (cacheable)
   const sportPack = buildBaseballPack({ settings });
   const systemPrompt = buildCoachSystemPrompt({ sportPack, pageContext });
   const staticSections: string[] = [systemPrompt, '', '# CURRENT DATA SNAPSHOT'];
@@ -741,20 +799,24 @@ Your team: ${leagueRow.myTeamName ?? '(not connected)'}`);
   if (standings) semiStaticSections.push(renderStandings(standings));
   const semiStaticBlock = semiStaticSections.join('\n\n') || '(no live standings/matchup yet)';
 
-  // Volatile
+  // Volatile (v1.5.1.3: always include other teams)
   const volatileSections: string[] = [];
-  const rosterSection = await buildUserRosterSection(weekSchedule, probables);
+  const rosterSection = await buildUserRosterSection(weekSchedule, probables, avail);
   if (rosterSection) volatileSections.push(rosterSection);
-  const { pool, tagged } = await buildAvailablePoolAndTagged(weekSchedule, probables);
+  const { pool, tagged } = await buildAvailablePoolAndTagged(weekSchedule, probables, avail);
   if (pool)    volatileSections.push(pool);
   if (tagged)  volatileSections.push(tagged);
   const waiverBlock = renderYahooWaivers(waiverB, waiverP);
   if (waiverBlock) volatileSections.push(waiverBlock);
 
-  const includedOtherTeams = rosters !== null && shouldIncludeOtherTeams(latestUserMessage);
-  if (includedOtherTeams) {
-    const otherBlock = renderOtherTeams(rosters!);
-    if (otherBlock) volatileSections.push(otherBlock);
+  // v1.5.1.3: ALWAYS include other teams' rosters when available
+  let includedOtherTeams = false;
+  if (rosters && rosters.length > 0) {
+    const otherBlock = renderOtherTeams(rosters);
+    if (otherBlock) {
+      volatileSections.push(otherBlock);
+      includedOtherTeams = true;
+    }
   }
 
   const volatileBlock = volatileSections.join('\n\n') ||
