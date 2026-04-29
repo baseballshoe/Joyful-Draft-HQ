@@ -1,0 +1,61 @@
+v1.5.1.5 deploy. I uploaded joyt-v1.5.1.5-markdown-and-rules.zip to project root. Three changes to apply:
+
+1. Install react-markdown:
+   npm install react-markdown
+
+2. Replace this file from the zip:
+   server/coach/personality.ts
+
+3. Patch client/src/components/ask-ai.tsx with TWO edits:
+
+   EDIT A — add ReactMarkdown import.
+   Find this exact line:
+     import { useState, useEffect, useRef } from 'react';
+   Add this line immediately after it:
+     import ReactMarkdown from 'react-markdown';
+
+   EDIT B — replace the message render block.
+   Find this exact block (it should appear once around line 477):
+               }}>
+                 {m.content || (m.role === 'assistant' && isStreaming && i === messages.length - 1
+                   ? <span style={{ opacity: .5 }}>thinking it over…</span>
+                   : ''
+                 )}
+               </div>
+   Replace with:
+               }}>
+                 {m.content
+                   ? <ReactMarkdown
+                       components={{
+                         h1: ({children}) => <strong style={{display:'block', marginTop:8}}>{children}</strong>,
+                         h2: ({children}) => <strong style={{display:'block', marginTop:8}}>{children}</strong>,
+                         h3: ({children}) => <strong style={{display:'block', marginTop:8}}>{children}</strong>,
+                         p:  ({children}) => <p style={{margin:'0 0 8px 0'}}>{children}</p>,
+                         ul: ({children}) => <ul style={{margin:'4px 0', paddingLeft:20}}>{children}</ul>,
+                         ol: ({children}) => <ol style={{margin:'4px 0', paddingLeft:20}}>{children}</ol>,
+                         li: ({children}) => <li style={{margin:'2px 0'}}>{children}</li>,
+                       }}
+                     >
+                       {m.content}
+                     </ReactMarkdown>
+                   : (m.role === 'assistant' && isStreaming && i === messages.length - 1
+                       ? <span style={{ opacity: .5 }}>thinking it over…</span>
+                       : '')
+                 }
+               </div>
+
+4. Verify changes:
+   - npm ls react-markdown (should show installed version)
+   - grep -c "ReactMarkdown" client/src/components/ask-ai.tsx (expect 3+)
+   - grep -c "ABSOLUTE FORMATTING RULE" server/coach/personality.ts (expect 1)
+   - grep -c "TIE EVERY RECOMMENDATION" server/coach/personality.ts (expect 1)
+
+5. Restart the app to pick up the new TypeScript files and dependencies.
+
+6. Delete the zip from project root after extracting:
+   - rm joyt-v1.5.1.5-markdown-and-rules.zip
+   - rm MIGRATION_NOTES_v1.5.1.5.md (if extracted to root)
+
+7. Tell me when verification passes. Don't commit to git yet — I'll handle git myself.
+
+If any step fails, stop and tell me. Don't improvise. Especially with the ask-ai.tsx patches: if the "find this exact block" doesn't match, stop and show me what you actually find.

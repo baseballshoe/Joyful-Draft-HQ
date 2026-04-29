@@ -15,6 +15,7 @@
 //     <AskAI pageContext="dashboard" showSearchBar />
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
 
 interface Message {
   role:    'user' | 'assistant';
@@ -474,10 +475,24 @@ export default function AskAI({ pageContext, contextData, showSearchBar = false 
                 maxWidth: '92%',
                 wordBreak: 'break-word',
               }}>
-                {m.content || (m.role === 'assistant' && isStreaming && i === messages.length - 1
-                  ? <span style={{ opacity: .5 }}>thinking it over…</span>
-                  : ''
-                )}
+                {m.content
+                  ? <ReactMarkdown
+                      components={{
+                        h1: ({children}) => <strong style={{display:'block', marginTop:8}}>{children}</strong>,
+                        h2: ({children}) => <strong style={{display:'block', marginTop:8}}>{children}</strong>,
+                        h3: ({children}) => <strong style={{display:'block', marginTop:8}}>{children}</strong>,
+                        p:  ({children}) => <p style={{margin:'0 0 8px 0'}}>{children}</p>,
+                        ul: ({children}) => <ul style={{margin:'4px 0', paddingLeft:20}}>{children}</ul>,
+                        ol: ({children}) => <ol style={{margin:'4px 0', paddingLeft:20}}>{children}</ol>,
+                        li: ({children}) => <li style={{margin:'2px 0'}}>{children}</li>,
+                      }}
+                    >
+                      {m.content}
+                    </ReactMarkdown>
+                  : (m.role === 'assistant' && isStreaming && i === messages.length - 1
+                      ? <span style={{ opacity: .5 }}>thinking it over…</span>
+                      : '')
+                }
               </div>
             </div>
           ))}
