@@ -523,7 +523,8 @@ function renderMatchup(sb: ParsedScoreboard, settings: ParsedLeagueSettings | nu
 
   if (settings) {
     const catLines: string[] = [];
-    for (const cat of settings.categories) {
+    const scoredCats = settings.categories.filter(c => !c.isDisplayOnly);
+    for (const cat of scoredCats) {
       const myV  = me.statsByStatId[cat.statId];
       const opV  = opp.statsByStatId[cat.statId];
       if (myV == null || opV == null) continue;

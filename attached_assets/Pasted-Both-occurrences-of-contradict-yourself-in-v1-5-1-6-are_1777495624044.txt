@@ -1,0 +1,73 @@
+Both occurrences of "contradict yourself" in v1.5.1.6 are intentional (one is the explanation, one is the rule reminder). Proceed with restart.
+
+Then immediately apply v1.5.1.7 — three surgical edits across two files:
+
+EDIT 1 of 3 — server/yahoo.ts: add isDisplayOnly field to ScoringCategory interface.
+
+Find this exact block:
+  export interface ScoringCategory {
+    statId:       string;
+    name:         string;
+    displayName:  string;
+    sortOrder:    'asc' | 'desc';   // asc = lower is better (ERA, WHIP)
+    positionType: string;           // "B" batter, "P" pitcher
+  }
+
+Replace with:
+  export interface ScoringCategory {
+    statId:       string;
+    name:         string;
+    displayName:  string;
+    sortOrder:    'asc' | 'desc';   // asc = lower is better (ERA, WHIP)
+    positionType: string;           // "B" batter, "P" pitcher
+    isDisplayOnly: boolean;
+  }
+
+EDIT 2 of 3 — server/yahoo.ts: read the is_only_display_stat flag in the parser.
+
+Find this exact block:
+      categories.push({
+        statId:        String(stat.stat_id),
+        name:          stat.name ?? '',
+        displayName:   stat.display_name ?? stat.name ?? '',
+        sortOrder:     stat.sort_order === '1' ? 'asc' : 'desc',
+        positionType:  stat.position_type ?? '',  // "B" or "P"
+      });
+
+Replace with:
+      categories.push({
+        statId:        String(stat.stat_id),
+        name:          stat.name ?? '',
+        displayName:   stat.display_name ?? stat.name ?? '',
+        sortOrder:     stat.sort_order === '1' ? 'asc' : 'desc',
+        positionType:  stat.position_type ?? '',
+        isDisplayOnly: String(stat.is_only_display_stat) === '1'
+                    || String(stat.is_excluded_from_display) === '1',
+      });
+
+EDIT 3 of 3 — server/coach/context.ts: filter display-only cats in renderMatchup.
+
+Find this exact block:
+    if (settings) {
+      const catLines: string[] = [];
+      for (const cat of settings.categories) {
+        const myV  = me.statsByStatId[cat.statId];
+        const opV  = opp.statsByStatId[cat.statId];
+
+Replace with:
+    if (settings) {
+      const catLines: string[] = [];
+      const scoredCats = settings.categories.filter(c => !c.isDisplayOnly);
+      for (const cat of scoredCats) {
+        const myV  = me.statsByStatId[cat.statId];
+        const opV  = opp.statsByStatId[cat.statId];
+
+VERIFICATION:
+1. grep -c "isDisplayOnly" server/yahoo.ts (expect 2)
+2. grep -c "is_only_display_stat" server/yahoo.ts (expect 1)
+3. grep -c "scoredCats" server/coach/context.ts (expect 2)
+4. Restart the app.
+
+Do not commit to git. I'll handle that myself.
+
+If any "find this exact block" step fails to match, stop and show me what you find. Don't improvise.

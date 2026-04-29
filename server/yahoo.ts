@@ -443,7 +443,9 @@ export async function getParsedLeagueSettings(leagueKey: string): Promise<Parsed
       name:          stat.name ?? '',
       displayName:   stat.display_name ?? stat.name ?? '',
       sortOrder:     stat.sort_order === '1' ? 'asc' : 'desc',
-      positionType:  stat.position_type ?? '',  // "B" or "P"
+      positionType:  stat.position_type ?? '',
+      isDisplayOnly: String(stat.is_only_display_stat) === '1'
+                  || String(stat.is_excluded_from_display) === '1',
     });
   }
 
@@ -652,6 +654,7 @@ export interface ScoringCategory {
   displayName:  string;
   sortOrder:    'asc' | 'desc';   // asc = lower is better (ERA, WHIP)
   positionType: string;           // "B" batter, "P" pitcher
+  isDisplayOnly: boolean;
 }
 
 export interface RosterSlot {
