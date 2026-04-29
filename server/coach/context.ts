@@ -6,6 +6,12 @@
 // v1.2: temporal awareness + schedule layer + two-start pitcher detection
 // v1.4: multi-source row merging + comprehensive stat formatters +
 //       fixes field-name bugs (strikeoutsPitched, hitsAllowed, etc.)
+// v1.5: Yahoo as highest-priority data source
+// v1.5.1.2: defensive percentage formatter — handles both decimal
+//           (0-1, FanGraphs convention) and percentage (0-100, Savant
+//           convention) storage formats per column. The same column
+//           can have different formats depending on which source wrote
+//           it; we detect and normalize at format time.
 //
 // Block layout:
 //   1. staticPrefix      Coach personality + sport pack + league
@@ -17,11 +23,8 @@
 //
 // MULTI-SOURCE MERGE (v1.4):
 //   pitcher_stats and batter_stats can have multiple rows per
-//   (player_id, season) — one per data_source ('mlb-stats-api',
-//   'fangraphs', 'savant'). We merge them column-by-column with
-//   source priority: MLB Stats API > FanGraphs > Savant for any
-//   column populated by multiple sources. NULL columns are filled
-//   in from whichever source has the value.
+//   (player_id, season) — one per data_source. v1.5 priority order:
+//   yahoo > mlb-stats-api > fangraphs > savant.
 // ─────────────────────────────────────────────────────────────────────
 import { db } from '../db';
 import {
@@ -43,6 +46,44 @@ const CURRENT_SEASON = new Date().getFullYear();
 
 // Source priority for merging multi-source rows. Lower index = higher priority.
 const SOURCE_PRIORITY = ['yahoo', 'mlb-stats-api', 'fangraphs', 'savant'];
+
+// ── v1.5.1.2: Defensive percentage formatter ─────────────────────────────
+//
+// THE PROBLEM:
+//   The same column can be stored in different scales depending on which
+//   data source wrote it. Confirmed examples in Aaron Judge's row:
+//     fangraphs: barrel_pct = 0.239   (decimal, 23.9%)
+//     savant:    barrel_pct = 26.1    (percentage, 26.1%)
+//
+//   Multiplying by 100 unconditionally turns 26.1 into 2610%.
+//   Skipping the multiply unconditionally turns 0.239 into 0.2%.
+//   Either way, half our data renders wrong.
+//
+// THE FIX:
+//   Detect at format time. Values > 1 are already percentages. Values
+//   ≤ 1 are decimal fractions and need the * 100. This handles both
+//   FanGraphs convention (decimal) and Savant convention (already-pct)
+//   without rewriting the data layer.
+//
+//   This SHOULD be a safe heuristic for percent-style columns:
+//   no real pct stat is naturally between 1.0 and 100% expressed as
+//   decimal. If hitters had a 1.0 (= 100%) anything-rate, fantasy
+//   wouldn't matter anymore.
+//
+// LONG-TERM NOTE:
+//   The architecturally cleaner fix is normalizing at the write layer
+//   (every source writes decimal). But with 4 sources writing the same
+//   column with different conventions and the possibility of new
+//   sources later (commercial swap to SportsDataIO), defensive read is
+//   more durable than a rolling-deploy-and-rescrape across all sources.
+
+function fmtPct(v: number | null | undefined, digits = 1): string | null {
+  if (v == null || !Number.isFinite(v)) return null;
+  // Already a percentage (e.g., 26.1 from Savant)
+  if (v > 1) return `${v.toFixed(digits)}%`;
+  // Decimal fraction (e.g., 0.239 from FanGraphs)
+  return `${(v * 100).toFixed(digits)}%`;
+}
 
 // ── Temporal context (v1.2) ──────────────────────────────────────────────
 
@@ -94,10 +135,6 @@ function shouldIncludeOtherTeams(latestUserMessage: string | undefined): boolean
 }
 
 // ── Multi-source row merging (v1.4) ──────────────────────────────────────
-//
-// pitcher_stats / batter_stats may have multiple rows per player from
-// different data sources. We collapse to one row per player by taking
-// the highest-priority non-null value per column.
 
 function mergeStatRows<T extends { dataSource?: string | null }>(rows: T[]): T | null {
   if (rows.length === 0) return null;
@@ -136,10 +173,7 @@ function rowsByPlayerId<T extends { playerId: number; dataSource?: string | null
   return merged;
 }
 
-// ── Data-completeness check (v1.4) — for limited-data flagging ───────────
-//
-// Returns a one-line tag describing how much data we have for a player.
-// Coach uses this to decide whether to caveat its analysis.
+// ── Data-completeness check (v1.4) ───────────────────────────────────────
 
 function batterDataCompleteness(stats: any | null): string {
   if (!stats) return 'NO STATS';
@@ -185,10 +219,7 @@ function buildScheduleAnnotation(
   return annotations.length ? ` | ${annotations.join(', ')}` : '';
 }
 
-// ── Comprehensive batter line formatter (v1.4 expansion) ─────────────────
-//
-// Includes EVERY useful column from batter_stats. Multi-line for
-// readability. Schema-correct field names (no v1.2 bugs).
+// ── Comprehensive batter line formatter (v1.4 + v1.5.1.2) ────────────────
 
 function formatBatterLine(
   p:            any,
@@ -251,24 +282,24 @@ function formatBatterLine(
   if (stats.wRCplus != null) sabermetric.push(`${Math.round(stats.wRCplus)} wRC+`);
   if (sabermetric.length) lines.push(`  · ${sabermetric.join(', ')}`);
 
-  // Statcast quality of contact
+  // Statcast quality of contact (v1.5.1.2: defensive pct formatter)
   const contact: string[] = [];
   if (stats.xBA != null)            contact.push(`${stats.xBA.toFixed(3)} xBA`);
   if (stats.xSLG != null)           contact.push(`${stats.xSLG.toFixed(3)} xSLG`);
   if (stats.xwOBA != null)          contact.push(`${stats.xwOBA.toFixed(3)} xwOBA`);
-  if (stats.barrelPct != null)      contact.push(`${(stats.barrelPct * 100).toFixed(1)}% Brl`);
-  if (stats.hardHitPct != null)     contact.push(`${(stats.hardHitPct * 100).toFixed(1)}% HH`);
+  const brl = fmtPct(stats.barrelPct);    if (brl) contact.push(`${brl} Brl`);
+  const hh  = fmtPct(stats.hardHitPct);   if (hh)  contact.push(`${hh} HH`);
   if (stats.avgExitVelo != null)    contact.push(`${stats.avgExitVelo.toFixed(1)} mph EV`);
   if (stats.maxExitVelo != null)    contact.push(`max ${stats.maxExitVelo.toFixed(1)}`);
   if (stats.avgLaunchAngle != null) contact.push(`${stats.avgLaunchAngle.toFixed(1)}° LA`);
   if (contact.length) lines.push(`  · contact: ${contact.join(', ')}`);
 
-  // Plate discipline
+  // Plate discipline (v1.5.1.2: defensive pct formatter)
   const discipline: string[] = [];
-  if (stats.chasePct != null)        discipline.push(`${(stats.chasePct * 100).toFixed(1)}% chase`);
-  if (stats.whiffPct != null)        discipline.push(`${(stats.whiffPct * 100).toFixed(1)}% whiff`);
-  if (stats.contactPct != null)      discipline.push(`${(stats.contactPct * 100).toFixed(1)}% contact`);
-  if (stats.zoneContactPct != null)  discipline.push(`${(stats.zoneContactPct * 100).toFixed(1)}% z-contact`);
+  const chase = fmtPct(stats.chasePct);       if (chase) discipline.push(`${chase} chase`);
+  const whiff = fmtPct(stats.whiffPct);       if (whiff) discipline.push(`${whiff} whiff`);
+  const ctct  = fmtPct(stats.contactPct);     if (ctct)  discipline.push(`${ctct} contact`);
+  const zctct = fmtPct(stats.zoneContactPct); if (zctct) discipline.push(`${zctct} z-contact`);
   if (discipline.length) lines.push(`  · discipline: ${discipline.join(', ')}`);
 
   // Speed
@@ -279,11 +310,7 @@ function formatBatterLine(
   return lines.join('\n');
 }
 
-// ── Comprehensive pitcher line formatter (v1.4 expansion + bugfixes) ─────
-//
-// FIXES BUG: v1.2 referenced stats.strikeouts (wrong — schema uses
-// strikeoutsPitched). Same for stats.hits → hitsAllowed, etc. As a
-// result every pitcher counting stat was silently NULL in Coach's view.
+// ── Comprehensive pitcher line formatter (v1.4 + v1.5.1.2) ───────────────
 
 function formatPitcherLine(
   p:            any,
@@ -337,13 +364,13 @@ function formatPitcherLine(
   if (stats.homerunsAllowed != null)   counting.push(`${stats.homerunsAllowed}HR`);
   if (counting.length) lines.push(`  · ${counting.join(' / ')}`);
 
-  // Rate stats
+  // Rate stats (v1.5.1.2: defensive pct formatter for rates)
   const rate: string[] = [];
   if (stats.kPer9 != null)    rate.push(`${stats.kPer9.toFixed(2)} K/9`);
   if (stats.bbPer9 != null)   rate.push(`${stats.bbPer9.toFixed(2)} BB/9`);
-  if (stats.kRate != null)    rate.push(`${(stats.kRate * 100).toFixed(1)}% K`);
-  if (stats.bbRate != null)   rate.push(`${(stats.bbRate * 100).toFixed(1)}% BB`);
-  if (stats.kMinusBB != null) rate.push(`${(stats.kMinusBB * 100).toFixed(1)}% K-BB`);
+  const kr  = fmtPct(stats.kRate);    if (kr)  rate.push(`${kr} K`);
+  const bbr = fmtPct(stats.bbRate);   if (bbr) rate.push(`${bbr} BB`);
+  const kbb = fmtPct(stats.kMinusBB); if (kbb) rate.push(`${kbb} K-BB`);
   if (rate.length) lines.push(`  · rates: ${rate.join(', ')}`);
 
   // Sabermetrics
@@ -362,26 +389,26 @@ function formatPitcherLine(
   if (stats.spinRate != null)        stuff.push(`${Math.round(stats.spinRate)} spin`);
   if (stuff.length) lines.push(`  · stuff: ${stuff.join(', ')}`);
 
-  // Statcast against (key for pitchers — was missing in v1.2)
+  // Statcast against (v1.5.1.2: defensive pct formatter)
   const against: string[] = [];
-  if (stats.xwOBAagainst != null)      against.push(`${stats.xwOBAagainst.toFixed(3)} xwOBA`);
-  if (stats.xBAagainst != null)        against.push(`${stats.xBAagainst.toFixed(3)} xBA`);
-  if (stats.barrelPctAgainst != null)  against.push(`${(stats.barrelPctAgainst * 100).toFixed(1)}% Brl`);
-  if (stats.hardHitPctAgainst != null) against.push(`${(stats.hardHitPctAgainst * 100).toFixed(1)}% HH`);
+  if (stats.xwOBAagainst != null)    against.push(`${stats.xwOBAagainst.toFixed(3)} xwOBA`);
+  if (stats.xBAagainst != null)      against.push(`${stats.xBAagainst.toFixed(3)} xBA`);
+  const brlA = fmtPct(stats.barrelPctAgainst);  if (brlA) against.push(`${brlA} Brl`);
+  const hhA  = fmtPct(stats.hardHitPctAgainst); if (hhA)  against.push(`${hhA} HH`);
   if (against.length) lines.push(`  · against: ${against.join(', ')}`);
 
-  // Pitch quality
+  // Pitch quality (v1.5.1.2: defensive pct formatter)
   const quality: string[] = [];
-  if (stats.cswPct != null)          quality.push(`${(stats.cswPct * 100).toFixed(1)}% CSW`);
-  if (stats.swStrikePct != null)     quality.push(`${(stats.swStrikePct * 100).toFixed(1)}% SwStr`);
-  if (stats.chasePctInduced != null) quality.push(`${(stats.chasePctInduced * 100).toFixed(1)}% chase`);
-  if (stats.zonePct != null)         quality.push(`${(stats.zonePct * 100).toFixed(1)}% zone`);
+  const csw  = fmtPct(stats.cswPct);          if (csw)  quality.push(`${csw} CSW`);
+  const swst = fmtPct(stats.swStrikePct);     if (swst) quality.push(`${swst} SwStr`);
+  const chs  = fmtPct(stats.chasePctInduced); if (chs)  quality.push(`${chs} chase`);
+  const zn   = fmtPct(stats.zonePct);         if (zn)   quality.push(`${zn} zone`);
   if (quality.length) lines.push(`  · pitch quality: ${quality.join(', ')}`);
 
   return lines.join('\n');
 }
 
-// ── Yahoo data renderers ──────────────────────────────────────────────────
+// ── Yahoo data renderers (unchanged from v1.4) ───────────────────────────
 
 function renderLeagueSettings(s: ParsedLeagueSettings): string {
   const battingCats = s.categories.filter(c => c.positionType === 'B').map(c => c.displayName);
@@ -524,8 +551,6 @@ async function buildUserRosterSection(
 
     const ids = myRoster.map(p => p.id);
 
-    // v1.4: don't restrict by data_source — pull all rows for these
-    // players in the current season, then merge.
     const battersRows = await db.select().from(batterStats)
       .where(and(
         eq(batterStats.season, CURRENT_SEASON),
